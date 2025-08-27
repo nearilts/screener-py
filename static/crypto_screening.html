@@ -167,6 +167,23 @@
                 </div>
             </div>
         </div>
+
+        <!-- Detail Modal -->
+        <div id="detailModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+            <div class="flex items-center justify-center min-h-screen p-4">
+                <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-screen overflow-y-auto">
+                    <div class="p-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h2 id="modalTitle" class="text-2xl font-bold text-gray-800">Symbol Analysis</h2>
+                            <button onclick="closeDetailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                        </div>
+                        <div id="modalContent" class="space-y-6">
+                            <!-- Modal content will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -262,28 +279,37 @@
                     </tr>
                 `;
             } else {
-                tbody.innerHTML = data.map(item => `
-                    <tr class="border-b hover:bg-gray-50">
-                        <td class="p-3 font-medium text-blue-600">${item.symbol}</td>
-                        <td class="p-3">${formatCurrency(parseFloat(item.current_price), item.symbol)}</td>
-                        <td class="p-3">
-                            <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium">
-                                ${parseFloat(item.rsi).toFixed(1)}
-                            </span>
-                        </td>
-                        <td class="p-3">${getSignalBadge(parseFloat(item.signal_strength))}</td>
-                        <td class="p-3">${formatCurrency(parseFloat(item.entry_level), item.symbol)}</td>
-                        <td class="p-3">${formatCurrency(parseFloat(item.take_profit), item.symbol)}</td>
-                        <td class="p-3">
-                            <span class="text-green-600 font-medium">+${formatPercentage(parseFloat(item.potential_profit))}</span>
-                        </td>
-                        <td class="p-3">
-                            <button onclick="analyzeSymbol('${item.symbol}')" class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
-                                Detail
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
+                tbody.innerHTML = data.map(item => {
+                    // Handle both old and new data formats
+                    const rsi = item.technical_analysis?.rsi || item.rsi || 0;
+                    const signalStrength = item.signal_strength || item.analysis?.score || 0;
+                    const entryPrice = item.entry_price || item.entry_level || item.current_price;
+                    const takeProfit = item.take_profit || item.current_price * 1.05;
+                    const profitPotential = item.profit_potential || item.potential_profit || 0;
+                    
+                    return `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="p-3 font-medium text-blue-600">${item.symbol.replace('_', '')}</td>
+                            <td class="p-3">${formatCurrency(parseFloat(item.current_price), item.symbol)}</td>
+                            <td class="p-3">
+                                <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium">
+                                    ${parseFloat(rsi).toFixed(1)}
+                                </span>
+                            </td>
+                            <td class="p-3">${getSignalBadge(parseFloat(signalStrength))}</td>
+                            <td class="p-3">${formatCurrency(parseFloat(entryPrice), item.symbol)}</td>
+                            <td class="p-3">${formatCurrency(parseFloat(takeProfit), item.symbol)}</td>
+                            <td class="p-3">
+                                <span class="text-green-600 font-medium">+${formatPercentage(parseFloat(profitPotential))}</span>
+                            </td>
+                            <td class="p-3">
+                                <button onclick="showDetailModal('${item.symbol}', ${JSON.stringify(item).replace(/'/g, '&apos;')})" class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
+                                    Detail
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
             }
             
             document.getElementById('resultsContainer').classList.remove('hidden');
@@ -453,6 +479,135 @@
                 startScreening();
             }
         }, 5 * 60 * 1000);
+
+        // Detail Modal Functions
+        function showDetailModal(symbol, data) {
+            try {
+                const parsedData = typeof data === 'string' ? JSON.parse(data) : data;
+                const modal = document.getElementById('detailModal');
+                const title = document.getElementById('modalTitle');
+                const content = document.getElementById('modalContent');
+                
+                title.textContent = `${symbol.replace('_', '')} - Advanced Analysis`;
+                
+                // Build modal content
+                const technicalData = parsedData.technical_analysis || {};
+                const tradingSignals = parsedData.trading_signals || [];
+                
+                content.innerHTML = `
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Price Information -->
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="text-lg font-semibold mb-3">💰 Price Information</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span>Current Price:</span>
+                                    <span class="font-medium">${formatCurrency(parsedData.current_price, symbol)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Entry Price:</span>
+                                    <span class="font-medium text-blue-600">${formatCurrency(parsedData.entry_price, symbol)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Take Profit:</span>
+                                    <span class="font-medium text-green-600">${formatCurrency(parsedData.take_profit, symbol)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Stop Loss:</span>
+                                    <span class="font-medium text-red-600">${formatCurrency(parsedData.stop_loss, symbol)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Risk/Reward -->
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="text-lg font-semibold mb-3">⚖️ Risk & Reward</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span>Profit Potential:</span>
+                                    <span class="font-medium text-green-600">+${parsedData.profit_potential?.toFixed(2) || 0}%</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Risk Exposure:</span>
+                                    <span class="font-medium text-red-600">-${parsedData.risk_percent?.toFixed(2) || 0}%</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Risk/Reward Ratio:</span>
+                                    <span class="font-medium text-blue-600">${parsedData.risk_reward_ratio?.toFixed(2) || 0}:1</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Signal Strength:</span>
+                                    <span class="font-medium">${getSignalBadge(parsedData.signal_strength || 0)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Technical Indicators -->
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="text-lg font-semibold mb-3">📊 Technical Indicators</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span>RSI (14):</span>
+                                    <span class="font-medium">${technicalData.rsi?.toFixed(1) || 'N/A'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>MACD Trend:</span>
+                                    <span class="font-medium ${technicalData.macd?.trend === 'bullish' ? 'text-green-600' : 'text-red-600'}">${technicalData.macd?.trend || 'N/A'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Support Level:</span>
+                                    <span class="font-medium">${formatCurrency(technicalData.support || 0, symbol)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Resistance Level:</span>
+                                    <span class="font-medium">${formatCurrency(technicalData.resistance || 0, symbol)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Volume Ratio:</span>
+                                    <span class="font-medium">${technicalData.volume_ratio?.toFixed(2) || 'N/A'}x</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Trading Signals -->
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="text-lg font-semibold mb-3">🚦 Trading Signals</h3>
+                            <div class="space-y-1">
+                                ${tradingSignals.map(signal => `
+                                    <div class="text-sm bg-white p-2 rounded border-l-4 border-blue-500">
+                                        ${signal}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Trading Plan -->
+                    <div class="bg-blue-50 p-4 rounded-lg mt-6">
+                        <h3 class="text-lg font-semibold mb-3">📋 Trading Plan</h3>
+                        <div class="text-sm font-mono bg-white p-3 rounded border">
+                            ${parsedData.trading_plan || 'No trading plan available'}
+                        </div>
+                    </div>
+                `;
+                
+                modal.classList.remove('hidden');
+            } catch (error) {
+                console.error('Error showing detail modal:', error);
+                alert('Error displaying details');
+            }
+        }
+
+        function closeDetailModal() {
+            document.getElementById('detailModal').classList.add('hidden');
+        }
+
+        // Close modal on backdrop click
+        document.getElementById('detailModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeDetailModal();
+            }
+        });
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
