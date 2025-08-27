@@ -227,14 +227,19 @@
             document.getElementById('currentSymbol').textContent = symbol ? `Analyzing: ${symbol}` : 'Processing...';
         }
 
-        function showSummary(data) {
+        function showSummary(data, fullResult = null) {
             const container = document.getElementById('summaryContainer');
             const bullishCount = data.length;
             const avgPotential = bullishCount > 0 ? 
-                (data.reduce((sum, item) => sum + parseFloat(item.potential_profit), 0) / bullishCount) : 0;
+                (data.reduce((sum, item) => sum + parseFloat(item.profit_potential || item.potential_profit || 0), 0) / bullishCount) : 0;
             const analysisTimeSeconds = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
 
-            document.getElementById('totalAnalyzed').textContent = document.getElementById('analysisLimit').value;
+            // Use advanced analysis data if available
+            const totalAnalyzed = fullResult ? 
+                (fullResult.total_analyzed || document.getElementById('analysisLimit').value) : 
+                document.getElementById('analysisLimit').value;
+
+            document.getElementById('totalAnalyzed').textContent = totalAnalyzed;
             document.getElementById('bullishCount').textContent = bullishCount;
             document.getElementById('avgPotential').textContent = formatPercentage(avgPotential);
             document.getElementById('analysisTime').textContent = `${analysisTimeSeconds}s`;
@@ -304,7 +309,7 @@
             const btn = document.getElementById('screeningBtn');
             const originalText = btn.innerHTML;
             
-            btn.innerHTML = '⏳ Analyzing...';
+            btn.innerHTML = '🔍 Advanced Analysis...';
             btn.disabled = true;
             
             // Hide previous results
@@ -313,21 +318,28 @@
             
             // Show progress
             showProgress(true);
+            updateProgress("🚀 Starting advanced bearish-to-bullish analysis...");
             
             try {
                 const quoteCurrency = document.getElementById('quoteCurrency').value;
                 const limit = document.getElementById('analysisLimit').value;
                 
-                const response = await fetch(`/screen?quote_currency=${quoteCurrency}&limit=${limit}`);
+                updateProgress("📊 Fetching candlestick data and analyzing technical indicators...");
+                
+                // Use advanced analysis by default
+                const response = await fetch(`/screen?quote_currency=${quoteCurrency}&limit=${limit}&type=advanced`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
+                updateProgress("🧮 Processing technical analysis results...");
+                
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    showSummary(result.data);
+                    updateProgress("✅ Analysis complete! Displaying results...");
+                    showSummary(result.data, result);
                     displayResults(result.data);
                 } else {
                     throw new Error(result.message || 'Analysis failed');
@@ -365,7 +377,7 @@
             resultsDiv.classList.remove('hidden');
 
             try {
-                const response = await fetch(`/api/analyze/${symbol}`);
+                const response = await fetch(`/analyze/${symbol}`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);

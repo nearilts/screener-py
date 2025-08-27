@@ -48,7 +48,14 @@ def application(environ, start_response):
                 "python_version": sys.version,
                 "screener_available": SCREENER_AVAILABLE,
                 "current_directory": current_dir,
-                "endpoints": ["/", "/health", "/symbols", "/screen", "/static/crypto_screening.html"]
+                "endpoints": [
+                    "/", 
+                    "/health", 
+                    "/symbols", 
+                    "/screen (Basic analysis)",
+                    "/screen?type=advanced (Advanced bearish-to-bullish analysis)",
+                    "/static/crypto_screening.html"
+                ]
             }
             return [json.dumps(response, indent=2).encode()]
         
@@ -112,6 +119,7 @@ def application(environ, start_response):
             # Get parameters
             quote_currency = query_params.get('quote_currency', 'USDT')
             limit = int(query_params.get('limit', '999'))  # Default to all coins
+            analysis_type = query_params.get('type', 'advanced')  # Default to advanced analysis
             
             # Allow unlimited analysis but warn about performance
             if limit > 500:
@@ -119,7 +127,13 @@ def application(environ, start_response):
             
             try:
                 screener = TokocryptoScreener()
-                result = screener.screen_bullish_candidates(quote_currency, limit)
+                
+                # Use advanced analysis for more accurate results
+                if analysis_type == 'advanced':
+                    result = screener.screen_bearish_to_bullish_advanced(quote_currency, limit)
+                else:
+                    result = screener.screen_bullish_candidates(quote_currency, limit)
+                    
                 return [json.dumps(result).encode()]
             except Exception as e:
                 error_response = {

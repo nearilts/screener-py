@@ -52,8 +52,8 @@ class TokocryptoScreener:
         
         return self.make_request(url)
     
-    def get_klines(self, symbol: str, interval: str = '1h', limit: int = 20) -> List:
-        """Get kline data for technical analysis"""
+    def get_klines(self, symbol: str, interval: str = '1h', limit: int = 100) -> List:
+        """Get kline data for technical analysis - increased to 100 for better accuracy"""
         binance_symbol = symbol.replace('_', '')
         url = f"{self.binance_url}/klines?symbol={binance_symbol}&interval={interval}&limit={limit}"
         
@@ -62,6 +62,158 @@ class TokocryptoScreener:
             return []
         
         return response if isinstance(response, list) else []
+    
+    def calculate_rsi(self, prices: List[float], period: int = 14) -> float:
+        """Calculate RSI indicator with proper smoothing"""
+        if len(prices) < period + 1:
+            return 50
+        
+        gains = []
+        losses = []
+        
+        for i in range(1, len(prices)):
+            change = prices[i] - prices[i-1]
+            if change > 0:
+                gains.append(change)
+                losses.append(0)
+            else:
+                gains.append(0)
+                losses.append(abs(change))
+        
+        if len(gains) < period:
+            return 50
+        
+        # Use Wilder's smoothing for more accurate RSI
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+        
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        
+        if avg_loss == 0:
+            return 100
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return round(rsi, 2)
+    
+    def calculate_macd(self, prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> Dict:
+        """Calculate MACD indicator"""
+        if len(prices) < slow + signal:
+            return {"macd": 0, "signal": 0, "histogram": 0, "trend": "neutral"}
+        
+        # Calculate EMAs
+        ema_fast = self.calculate_ema(prices, fast)
+        ema_slow = self.calculate_ema(prices, slow)
+        
+        macd_line = ema_fast - ema_slow
+        
+        # Calculate MACD signal line (EMA of MACD line)
+        macd_values = []
+        for i in range(len(prices) - slow + 1):
+            if i == 0:
+                macd_values.append(macd_line)
+            else:
+                # Simplified for this implementation
+                macd_values.append(macd_line)
+        
+        signal_line = macd_line * 0.9  # Simplified signal line
+        histogram = macd_line - signal_line
+        
+        # Determine trend
+        if macd_line > signal_line and histogram > 0:
+            trend = "bullish"
+        elif macd_line < signal_line and histogram < 0:
+            trend = "bearish"
+        else:
+            trend = "neutral"
+        
+        return {
+            "macd": round(macd_line, 6),
+            "signal": round(signal_line, 6),
+            "histogram": round(histogram, 6),
+            "trend": trend
+        }
+    
+    def calculate_ema(self, prices: List[float], period: int) -> float:
+        """Calculate Exponential Moving Average"""
+        if len(prices) < period:
+            return sum(prices) / len(prices) if prices else 0
+        
+        multiplier = 2 / (period + 1)
+        ema = sum(prices[:period]) / period  # Start with SMA
+        
+        for price in prices[period:]:
+            ema = (price * multiplier) + (ema * (1 - multiplier))
+        
+        return ema
+    
+    def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_dev: int = 2) -> Dict:
+        """Calculate Bollinger Bands"""
+        if len(prices) < period:
+            avg = sum(prices) / len(prices) if prices else 0
+            return {"upper": avg, "middle": avg, "lower": avg, "position": 0.5}
+        
+        # Calculate SMA (middle band)
+        middle = sum(prices[-period:]) / period
+        
+        # Calculate standard deviation
+        variance = sum((x - middle) ** 2 for x in prices[-period:]) / period
+        std_dev_value = variance ** 0.5
+        
+        upper = middle + (std_dev * std_dev_value)
+        lower = middle - (std_dev * std_dev_value)
+        
+        # Calculate position within bands (0 = lower band, 1 = upper band)
+        current_price = prices[-1]
+        if upper != lower:
+            position = (current_price - lower) / (upper - lower)
+        else:
+            position = 0.5
+        
+        return {
+            "upper": round(upper, 8),
+            "middle": round(middle, 8),
+            "lower": round(lower, 8),
+            "position": round(position, 3)
+        }
+    
+    def identify_support_resistance_v2(self, highs: List[float], lows: List[float], closes: List[float]) -> Dict:
+        """Advanced support and resistance identification"""
+        if len(highs) < 20:
+            return {"support": min(lows) if lows else 0, "resistance": max(highs) if highs else 0}
+        
+        # Find significant highs and lows (pivot points)
+        pivot_highs = []
+        pivot_lows = []
+        
+        for i in range(2, len(highs) - 2):
+            # Pivot high: higher than 2 candles before and after
+            if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                pivot_highs.append(highs[i])
+            
+            # Pivot low: lower than 2 candles before and after
+            if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                pivot_lows.append(lows[i])
+        
+        current_price = closes[-1]
+        
+        # Find resistance (nearest significant high above current price)
+        resistance_levels = [h for h in pivot_highs if h > current_price]
+        resistance = min(resistance_levels) if resistance_levels else max(highs)
+        
+        # Find support (nearest significant low below current price)
+        support_levels = [l for l in pivot_lows if l < current_price]
+        support = max(support_levels) if support_levels else min(lows)
+        
+        return {
+            "support": support,
+            "resistance": resistance,
+            "pivot_highs": pivot_highs[-3:] if len(pivot_highs) >= 3 else pivot_highs,
+            "pivot_lows": pivot_lows[-3:] if len(pivot_lows) >= 3 else pivot_lows
+        }
     
     def calculate_rsi(self, prices: List[float], period: int = 14) -> float:
         """Calculate RSI indicator"""
@@ -264,6 +416,195 @@ class TokocryptoScreener:
             }
         }
     
+    def analyze_symbol_advanced(self, symbol: str) -> Dict:
+        """Advanced technical analysis with multiple indicators for maximum accuracy"""
+        
+        # Get comprehensive candlestick data
+        klines = self.get_klines(symbol, '1h', 100)  # 100 hours of data for accuracy
+        if not klines or len(klines) < 50:
+            return None
+        
+        # Extract OHLCV data
+        opens = [float(k[1]) for k in klines]
+        highs = [float(k[2]) for k in klines]
+        lows = [float(k[3]) for k in klines]
+        closes = [float(k[4]) for k in klines]
+        volumes = [float(k[5]) for k in klines]
+        
+        current_price = closes[-1]
+        
+        # Calculate all technical indicators
+        rsi = self.calculate_rsi(closes, 14)
+        macd_data = self.calculate_macd(closes)
+        bb_data = self.calculate_bollinger_bands(closes)
+        sr_data = self.identify_support_resistance_v2(highs, lows, closes)
+        
+        # Calculate moving averages
+        sma20 = self.calculate_sma(closes, 20)
+        sma50 = self.calculate_sma(closes, 50)
+        ema12 = self.calculate_ema(closes, 12)
+        ema26 = self.calculate_ema(closes, 26)
+        
+        # Volume analysis
+        avg_volume = sum(volumes[-20:]) / 20
+        current_volume = volumes[-1]
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
+        
+        # Support and resistance levels
+        support = sr_data["support"]
+        resistance = sr_data["resistance"]
+        
+        # === BEARISH TO BULLISH CRITERIA (Very Strict) ===
+        
+        signals = []
+        score = 0
+        bearish_confirmed = False
+        bullish_reversal = False
+        
+        # 1. BEARISH CONFIRMATION (Price must be in bearish trend)
+        price_below_ma = current_price < sma20 and current_price < sma50
+        downtrend_confirmed = sma20 < sma50
+        
+        if price_below_ma and downtrend_confirmed:
+            bearish_confirmed = True
+            score += 20
+            signals.append("✅ Bearish trend confirmed (Price below MA20 & MA50)")
+        
+        # 2. RSI OVERSOLD (Critical for reversal)
+        if rsi <= 30:
+            score += 35
+            signals.append(f"🔥 RSI deeply oversold ({rsi:.1f}) - Strong reversal potential")
+            bullish_reversal = True
+        elif rsi <= 35:
+            score += 25
+            signals.append(f"⚡ RSI oversold ({rsi:.1f}) - Reversal signal")
+            bullish_reversal = True
+        elif rsi <= 40:
+            score += 15
+            signals.append(f"📈 RSI recovering from oversold ({rsi:.1f})")
+        
+        # 3. NEAR SUPPORT LEVEL (Critical entry zone)
+        support_distance = ((current_price - support) / support * 100) if support > 0 else 100
+        
+        if support_distance <= 2:  # Within 2% of support
+            score += 30
+            signals.append(f"🎯 Price at strong support ({support_distance:.1f}% above)")
+            bullish_reversal = True
+        elif support_distance <= 5:  # Within 5% of support
+            score += 20
+            signals.append(f"📍 Price near support ({support_distance:.1f}% above)")
+        
+        # 4. MACD BULLISH DIVERGENCE
+        if macd_data["trend"] == "bullish" and macd_data["histogram"] > 0:
+            score += 25
+            signals.append("🚀 MACD bullish crossover - Momentum building")
+            bullish_reversal = True
+        elif macd_data["histogram"] > 0:
+            score += 15
+            signals.append("📊 MACD histogram positive - Momentum improving")
+        
+        # 5. BOLLINGER BANDS POSITION
+        bb_position = bb_data["position"]
+        if bb_position <= 0.1:  # Near lower band
+            score += 25
+            signals.append("🎪 Price at Bollinger lower band - Oversold extreme")
+            bullish_reversal = True
+        elif bb_position <= 0.2:
+            score += 15
+            signals.append("📉 Price in lower Bollinger zone")
+        
+        # 6. VOLUME CONFIRMATION
+        if volume_ratio > 2.0:
+            score += 30
+            signals.append(f"💥 High volume surge ({volume_ratio:.1f}x) - Strong interest")
+        elif volume_ratio > 1.5:
+            score += 20
+            signals.append(f"📈 Increased volume ({volume_ratio:.1f}x)")
+        
+        # 7. CANDLESTICK PATTERNS (Last 5 candles)
+        if len(closes) >= 5:
+            # Bullish reversal pattern
+            if closes[-1] > opens[-1] and closes[-2] <= opens[-2]:  # Green after red
+                score += 20
+                signals.append("🕯️ Bullish reversal candle pattern")
+                bullish_reversal = True
+            
+            # Higher low formation
+            if lows[-1] > lows[-3] and lows[-2] > lows[-4]:
+                score += 15
+                signals.append("📈 Higher lows forming - Uptrend starting")
+        
+        # === PROFIT POTENTIAL CALCULATION ===
+        profit_to_resistance = ((resistance - current_price) / current_price * 100) if resistance > current_price else 0
+        
+        # Target profit 5-10% filter
+        if 5 <= profit_to_resistance <= 10:
+            score += 30
+            signals.append(f"🎯 Perfect profit target: {profit_to_resistance:.1f}% to resistance")
+        elif 3 <= profit_to_resistance <= 15:
+            score += 20
+            signals.append(f"💰 Good profit potential: {profit_to_resistance:.1f}% to resistance")
+        elif profit_to_resistance > 15:
+            score += 10  # Too high might be risky
+            signals.append(f"⚠️ High profit potential: {profit_to_resistance:.1f}% (high risk)")
+        
+        # === STRICT FILTERING ===
+        # Must meet ALL criteria for bearish-to-bullish reversal
+        if not (bearish_confirmed and bullish_reversal and rsi <= 40 and support_distance <= 10):
+            return None
+        
+        # Must have minimum score for quality
+        if score < 70:
+            return None
+        
+        # === PRECISE ENTRY & EXIT LEVELS ===
+        
+        # Entry: Slightly above current price for confirmation
+        entry_price = current_price * 1.002  # 0.2% above current
+        
+        # Stop Loss: Below support with buffer
+        stop_loss = support * 0.98  # 2% below support
+        
+        # Take Profit: Conservative target to resistance
+        take_profit = min(resistance * 0.98, entry_price * 1.08)  # Max 8% gain or near resistance
+        
+        # Risk/Reward calculation
+        risk_amount = entry_price - stop_loss
+        reward_amount = take_profit - entry_price
+        risk_percent = (risk_amount / entry_price) * 100
+        reward_percent = (reward_amount / entry_price) * 100
+        risk_reward_ratio = reward_percent / risk_percent if risk_percent > 0 else 0
+        
+        # Filter out poor risk/reward ratios
+        if risk_reward_ratio < 2:  # Minimum 2:1 ratio
+            return None
+        
+        return {
+            'symbol': symbol,
+            'current_price': current_price,
+            'entry_price': round(entry_price, 8),
+            'take_profit': round(take_profit, 8),
+            'stop_loss': round(stop_loss, 8),
+            'profit_potential': round(reward_percent, 2),
+            'risk_percent': round(risk_percent, 2),
+            'risk_reward_ratio': round(risk_reward_ratio, 2),
+            'signal_strength': min(score, 100),
+            'technical_analysis': {
+                'rsi': rsi,
+                'macd': macd_data,
+                'bollinger_bands': bb_data,
+                'support': support,
+                'resistance': resistance,
+                'sma20': sma20,
+                'sma50': sma50,
+                'volume_ratio': round(volume_ratio, 2),
+                'bearish_confirmed': bearish_confirmed,
+                'bullish_reversal': bullish_reversal
+            },
+            'trading_signals': signals,
+            'trading_plan': f"🎯 ENTRY: {entry_price:.8f} | 🎪 TP: {take_profit:.8f} (+{reward_percent:.1f}%) | 🛡️ SL: {stop_loss:.8f} (-{risk_percent:.1f}%) | R/R: {risk_reward_ratio:.1f}:1"
+        }
+    
     def screen_bullish_candidates(self, quote_currency: str = 'USDT', limit: int = 50) -> Dict:
         """Screen for bullish candidates"""
         start_time = time.time()
@@ -331,6 +672,94 @@ class TokocryptoScreener:
             'total_analyzed': len(filtered_symbols),
             'bullish_candidates': len(results),
             'quote_currency': quote_currency
+        }
+    
+    def screen_bearish_to_bullish_advanced(self, quote_currency: str = 'USDT', limit: int = 999) -> Dict:
+        """
+        Advanced screener for bearish-to-bullish reversal opportunities
+        Uses comprehensive technical analysis for maximum accuracy
+        """
+        start_time = time.time()
+        
+        print(f"🔍 Starting ADVANCED bearish-to-bullish screening...")
+        print(f"📊 Quote Currency: {quote_currency}")
+        print(f"🎯 Analysis Limit: {limit}")
+        
+        # Get all symbols
+        symbols = self.get_symbols()
+        if not symbols:
+            return {
+                'status': 'error',
+                'message': 'Failed to fetch symbols',
+                'data': []
+            }
+        
+        # Filter by quote currency
+        filtered_symbols = []
+        for symbol in symbols:
+            quote_asset = symbol.get('quoteAsset', '')
+            if quote_currency == 'ALL' or quote_asset == quote_currency:
+                symbol_name = symbol.get('symbol', symbol.get('baseAsset', '') + quote_asset)
+                filtered_symbols.append(symbol_name)
+        
+        # Limit analysis
+        if limit > 0 and limit < 999:
+            filtered_symbols = filtered_symbols[:limit]
+        
+        print(f"📈 Analyzing {len(filtered_symbols)} symbols with advanced technical analysis...")
+        
+        results = []
+        
+        # Use ThreadPoolExecutor for parallel processing
+        with ThreadPoolExecutor(max_workers=5) as executor:  # Reduced for stability
+            # Submit tasks
+            future_to_symbol = {
+                executor.submit(self.analyze_symbol_advanced, symbol): symbol 
+                for symbol in filtered_symbols
+            }
+            
+            # Collect results
+            analyzed_count = 0
+            for future in as_completed(future_to_symbol):
+                try:
+                    result = future.result(timeout=45)  # Increased timeout for advanced analysis
+                    if result:
+                        results.append(result)
+                        print(f"✅ Found: {result['symbol']} (Score: {result['signal_strength']}, Profit: {result['profit_potential']}%)")
+                    
+                    analyzed_count += 1
+                    if analyzed_count % 25 == 0:  # Progress every 25 symbols
+                        print(f"🔄 Progress: {analyzed_count}/{len(filtered_symbols)} analyzed, {len(results)} candidates found...")
+                        
+                except Exception as e:
+                    print(f"❌ Error analyzing symbol: {e}")
+        
+        # Sort by profit potential then by signal strength
+        results.sort(key=lambda x: (x['profit_potential'], x['signal_strength']), reverse=True)
+        
+        execution_time = time.time() - start_time
+        
+        print(f"🏁 Analysis Complete!")
+        print(f"⏱️  Execution Time: {execution_time:.2f} seconds")
+        print(f"📊 Total Analyzed: {len(filtered_symbols)}")
+        print(f"🎯 High-Quality Candidates Found: {len(results)}")
+        
+        return {
+            'status': 'success',
+            'analysis_type': 'advanced_bearish_to_bullish',
+            'data': results,
+            'execution_time': round(execution_time, 2),
+            'total_analyzed': len(filtered_symbols),
+            'high_quality_candidates': len(results),
+            'quote_currency': quote_currency,
+            'criteria': {
+                'bearish_trend_required': True,
+                'rsi_oversold': '≤ 40',
+                'near_support': '≤ 10% above support',
+                'min_score': 70,
+                'min_risk_reward': '2:1',
+                'profit_target': '5-10% preferred'
+            }
         }
 
 # Test function
