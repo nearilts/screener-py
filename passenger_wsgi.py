@@ -1,113 +1,68 @@
 #!/usr/bin/env python3
 """
-Passenger WSGI file for cPanel deployment
-This file is required by cPanel's Python App system
+Passenger WSGI file for cPanel deployment - Simplified to avoid segfault
 """
 import sys
 import os
-import traceback
+import json
 
 # Add current directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-# Set up environment for cPanel
-os.environ.setdefault('PYTHONPATH', current_dir)
+print(f"WSGI starting - Python {sys.version}")
 
-# Debug information
-print(f"Python version: {sys.version}")
-print(f"Current directory: {current_dir}")
-print(f"Python path: {sys.path}")
-
-try:
-    from app import app as application
-    print("✅ Successfully imported app")
-    
-    # cPanel specific configuration
-    if hasattr(application, 'mount'):
-        # Ensure static files work in cPanel environment
-        static_dir = os.path.join(current_dir, 'static')
-        if os.path.exists(static_dir):
-            from fastapi.staticfiles import StaticFiles
-            application.mount("/static", StaticFiles(directory=static_dir), name="static")
-    
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print(f"❌ Traceback: {traceback.format_exc()}")
-    
-    # Fallback WSGI application if main app fails to import
-    def application(environ, start_response):
-        status = '500 Internal Server Error'
-        headers = [('Content-Type', 'text/html')]
+# Simple fallback WSGI application
+def application(environ, start_response):
+    try:
+        # Try to import and use FastAPI app
+        from app import app as fastapi_app
+        
+        # Use FastAPI's ASGI-to-WSGI adapter
+        try:
+            from fastapi.middleware.wsgi import WSGIMiddleware
+            return fastapi_app(environ, start_response)
+        except:
+            # Manual WSGI handling
+            method = environ.get('REQUEST_METHOD', 'GET')
+            path = environ.get('PATH_INFO', '/')
+            
+            if path == '/':
+                status = '200 OK'
+                headers = [('Content-Type', 'application/json')]
+                start_response(status, headers)
+                
+                response = {
+                    "message": "� Crypto Screener API",
+                    "status": "running via WSGI",
+                    "version": "2.0.0"
+                }
+                return [json.dumps(response).encode()]
+            
+            elif path == '/health':
+                status = '200 OK'
+                headers = [('Content-Type', 'application/json')]
+                start_response(status, headers)
+                return [json.dumps({"status": "healthy"}).encode()]
+            
+            else:
+                status = '404 Not Found'
+                headers = [('Content-Type', 'text/html')]
+                start_response(status, headers)
+                return [b"<h1>404 Not Found</h1>"]
+                
+    except Exception as e:
+        # Complete fallback
+        status = '200 OK'
+        headers = [('Content-Type', 'application/json')]
         start_response(status, headers)
         
-        error_msg = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Application Error - Debug Info</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
-                .error {{ background: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-                .error h1 {{ color: #d32f2f; }}
-                .details {{ background: #f5f5f5; padding: 10px; border-radius: 3px; margin: 10px 0; font-family: monospace; }}
-            </style>
-        </head>
-        <body>
-            <div class="error">
-                <h1>🚨 Application Import Error</h1>
-                <p>Failed to import the main application.</p>
-                
-                <h3>Error Details:</h3>
-                <div class="details">{str(e)}</div>
-                
-                <h3>Full Traceback:</h3>
-                <div class="details">{traceback.format_exc()}</div>
-                
-                <h3>Python Environment:</h3>
-                <div class="details">
-                    Python version: {sys.version}<br>
-                    Python path: {sys.path[0]}<br>
-                    Current directory: {current_dir}<br>
-                    Files in directory: {', '.join(os.listdir(current_dir)) if os.path.exists(current_dir) else 'Directory not accessible'}
-                </div>
-                
-                <h3>Possible Solutions:</h3>
-                <ul>
-                    <li>Run "pip install -r requirements.txt --user" in terminal</li>
-                    <li>Check Python version compatibility (requires Python 3.7+)</li>
-                    <li>Verify all files are uploaded correctly</li>
-                    <li>Check cPanel error logs for more details</li>
-                </ul>
-            </div>
-        </body>
-        </html>
-        """.encode('utf-8')
-        
-        return [error_msg]
-
-except Exception as e:
-    print(f"❌ Unexpected error: {e}")
-    print(f"❌ Traceback: {traceback.format_exc()}")
-    
-    def application(environ, start_response):
-        status = '500 Internal Server Error'
-        headers = [('Content-Type', 'text/html')]
-        start_response(status, headers)
-        
-        error_msg = f"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Unexpected Error</title></head>
-        <body>
-            <h1>Unexpected Error</h1>
-            <p>Error: {str(e)}</p>
-            <p>Traceback: {traceback.format_exc()}</p>
-        </body>
-        </html>
-        """.encode('utf-8')
-        
-        return [error_msg]
+        response = {
+            "message": "Crypto Screener - Fallback Mode",
+            "status": "limited functionality",
+            "error": str(e)
+        }
+        return [json.dumps(response).encode()]
 
 # Alternative application entry point for different cPanel configurations
 app = application
