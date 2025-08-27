@@ -6,7 +6,27 @@ import sys
 import os
 import json
 
-# Add current directory to Python path
+# Add curren            try:
+                screener = TokocryptoScreener()
+                
+                # Use advanced analysis by default, but allow basic fallback
+                if analysis_type == 'advanced':
+                    result = screener.screen_bearish_to_bullish_advanced(quote_currency, limit)
+                    
+                    # If advanced returns no results, try basic analysis as fallback
+                    if result.get('high_quality_candidates', 0) == 0:
+                        print("⚠️ Advanced analysis found no results, trying basic analysis...")
+                        basic_result = screener.screen_bullish_candidates(quote_currency, limit)
+                        if basic_result.get('bullish_candidates', 0) > 0:
+                            result = {
+                                **basic_result,
+                                'analysis_type': 'basic_fallback',
+                                'note': 'Advanced criteria too strict, showing basic analysis results'
+                            }
+                else:
+                    result = screener.screen_bullish_candidates(quote_currency, limit)
+                    
+                return [json.dumps(result).encode()]y to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
@@ -52,6 +72,7 @@ def application(environ, start_response):
                     "/", 
                     "/health", 
                     "/symbols", 
+                    "/debug?symbol=BTCUSDT (Test single symbol analysis)",
                     "/screen (Basic analysis)",
                     "/screen?type=advanced (Advanced bearish-to-bullish analysis)",
                     "/static/crypto_screening.html"
@@ -104,6 +125,37 @@ def application(environ, start_response):
                 return [json.dumps(response, indent=2).encode()]
             except Exception as e:
                 return [json.dumps({"error": str(e)}).encode()]
+        
+        elif path == '/debug':
+            # Debug endpoint to test single symbol analysis
+            if not SCREENER_AVAILABLE:
+                status = '503 Service Unavailable'
+                headers = [('Content-Type', 'application/json')]
+                start_response(status, headers)
+                return [json.dumps({"error": "Screener not available"}).encode()]
+            
+            status = '200 OK'
+            headers = [('Content-Type', 'application/json')]
+            start_response(status, headers)
+            
+            symbol = query_params.get('symbol', 'BTCUSDT')
+            
+            try:
+                screener = TokocryptoScreener()
+                
+                # Test both basic and advanced analysis
+                basic_result = screener.analyze_symbol({'symbol': symbol})
+                advanced_result = screener.analyze_symbol_advanced(symbol)
+                
+                response = {
+                    "symbol": symbol,
+                    "basic_analysis": basic_result,
+                    "advanced_analysis": advanced_result,
+                    "debug_info": "Use this to see why symbols pass/fail filters"
+                }
+                return [json.dumps(response, indent=2).encode()]
+            except Exception as e:
+                return [json.dumps({"error": str(e), "symbol": symbol}).encode()]
         
         elif path == '/screen':
             if not SCREENER_AVAILABLE:

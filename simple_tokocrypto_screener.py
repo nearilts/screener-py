@@ -548,13 +548,20 @@ class TokocryptoScreener:
             score += 10  # Too high might be risky
             signals.append(f"⚠️ High profit potential: {profit_to_resistance:.1f}% (high risk)")
         
-        # === STRICT FILTERING ===
-        # Must meet ALL criteria for bearish-to-bullish reversal
-        if not (bearish_confirmed and bullish_reversal and rsi <= 40 and support_distance <= 10):
+        # === RELAXED FILTERING FOR MORE RESULTS ===
+        # Requirements: At least some bearish + oversold signals
+        
+        # Require at least some bearish indication OR oversold condition
+        basic_requirement = (
+            (price_below_ma or rsi <= 45) and  # Either below MA or moderately oversold
+            (bullish_reversal or rsi <= 40 or support_distance <= 15)  # Some reversal signal
+        )
+        
+        if not basic_requirement:
             return None
         
-        # Must have minimum score for quality
-        if score < 70:
+        # Lower minimum score for more results
+        if score < 40:  # Reduced from 70 to 40
             return None
         
         # === PRECISE ENTRY & EXIT LEVELS ===
@@ -575,8 +582,8 @@ class TokocryptoScreener:
         reward_percent = (reward_amount / entry_price) * 100
         risk_reward_ratio = reward_percent / risk_percent if risk_percent > 0 else 0
         
-        # Filter out poor risk/reward ratios
-        if risk_reward_ratio < 2:  # Minimum 2:1 ratio
+        # Relaxed risk/reward filter - accept lower ratios for more opportunities
+        if risk_reward_ratio < 1.2:  # Reduced from 2:1 to 1.2:1
             return None
         
         return {
@@ -753,12 +760,11 @@ class TokocryptoScreener:
             'high_quality_candidates': len(results),
             'quote_currency': quote_currency,
             'criteria': {
-                'bearish_trend_required': True,
-                'rsi_oversold': '≤ 40',
-                'near_support': '≤ 10% above support',
-                'min_score': 70,
-                'min_risk_reward': '2:1',
-                'profit_target': '5-10% preferred'
+                'bearish_trend_or_oversold': 'Price below MA OR RSI ≤ 45',
+                'reversal_signals': 'RSI ≤ 40 OR near support OR bullish patterns',
+                'min_score': 40,  # Reduced for more results
+                'min_risk_reward': '1.2:1',  # More realistic
+                'profit_target': 'Any positive potential'
             }
         }
 
