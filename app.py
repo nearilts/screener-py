@@ -21,9 +21,15 @@ from datetime import datetime
 try:
     from tokocrypto_screener import TokocryptoScreener
     SCREENER_AVAILABLE = True
+    print("✅ Using original TokocryptoScreener")
 except ImportError:
-    SCREENER_AVAILABLE = False
-    logging.warning("TokocryptoScreener not available, using fallback mode")
+    try:
+        from simple_tokocrypto_screener import TokocryptoScreener
+        SCREENER_AVAILABLE = True
+        print("✅ Using simple TokocryptoScreener")
+    except ImportError:
+        SCREENER_AVAILABLE = False
+        logging.warning("No screener available, using fallback mode")
 
 # Setup logging for cPanel
 logging.basicConfig(
