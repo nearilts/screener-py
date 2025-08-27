@@ -6,7 +6,27 @@ import sys
 import os
 import json
 
-# Add current directory to Python path
+# Add curren            try:
+                screener = TokocryptoScreener()
+                
+                # Use advanced analysis by default, but allow basic fallback
+                if analysis_type == 'advanced':
+                    result = screener.screen_bearish_to_bullish_advanced(quote_currency, limit)
+                    
+                    # If advanced returns no results, try basic analysis as fallback
+                    if result.get('high_quality_candidates', 0) == 0:
+                        print("⚠️ Advanced analysis found no results, trying basic analysis...")
+                        basic_result = screener.screen_bullish_candidates(quote_currency, limit)
+                        if basic_result.get('bullish_candidates', 0) > 0:
+                            result = {
+                                **basic_result,
+                                'analysis_type': 'basic_fallback',
+                                'note': 'Advanced criteria too strict, showing basic analysis results'
+                            }
+                else:
+                    result = screener.screen_bullish_candidates(quote_currency, limit)
+                    
+                return [json.dumps(result).encode()]y to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
@@ -160,20 +180,9 @@ def application(environ, start_response):
             try:
                 screener = TokocryptoScreener()
                 
-                # Use advanced analysis by default, but allow basic fallback
+                # Use advanced analysis for more accurate results
                 if analysis_type == 'advanced':
                     result = screener.screen_bearish_to_bullish_advanced(quote_currency, limit)
-                    
-                    # If advanced returns no results, try basic analysis as fallback
-                    if result.get('high_quality_candidates', 0) == 0:
-                        print("⚠️ Advanced analysis found no results, trying basic analysis...")
-                        basic_result = screener.screen_bullish_candidates(quote_currency, limit)
-                        if basic_result.get('bullish_candidates', 0) > 0:
-                            result = {
-                                **basic_result,
-                                'analysis_type': 'basic_fallback',
-                                'note': 'Advanced criteria too strict, showing basic analysis results'
-                            }
                 else:
                     result = screener.screen_bullish_candidates(quote_currency, limit)
                     
@@ -229,7 +238,7 @@ def application(environ, start_response):
             response = {
                 "error": "Not found",
                 "path": path,
-                "available_endpoints": ["/", "/health", "/symbols", "/debug", "/screen", "/static/crypto_screening.html"]
+                "available_endpoints": ["/", "/health", "/symbols", "/screen", "/static/crypto_screening.html"]
             }
             return [json.dumps(response).encode()]
     
@@ -248,3 +257,7 @@ def application(environ, start_response):
             "current_directory": os.getcwd()
         }
         return [json.dumps(error_response).encode()]
+
+if __name__ == "__main__":
+    print("✅ Pure WSGI loaded successfully")
+    print(f"Screener available: {SCREENER_AVAILABLE}")
