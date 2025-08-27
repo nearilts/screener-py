@@ -48,7 +48,7 @@ def application(environ, start_response):
                 "python_version": sys.version,
                 "screener_available": SCREENER_AVAILABLE,
                 "current_directory": current_dir,
-                "endpoints": ["/", "/health", "/screen", "/static/crypto_screening.html"]
+                "endpoints": ["/", "/health", "/symbols", "/screen", "/static/crypto_screening.html"]
             }
             return [json.dumps(response, indent=2).encode()]
         
@@ -66,6 +66,37 @@ def application(environ, start_response):
                 "files_count": len(os.listdir('.'))
             }
             return [json.dumps(response).encode()]
+        
+        elif path == '/symbols':
+            status = '200 OK'
+            headers = [('Content-Type', 'application/json')]
+            start_response(status, headers)
+            
+            if not SCREENER_AVAILABLE:
+                return [json.dumps({"error": "Screener not available"}).encode()]
+            
+            try:
+                screener = TokocryptoScreener()
+                symbols = screener.get_symbols()
+                
+                # Get unique quote assets
+                quote_assets = set()
+                symbol_count = {}
+                
+                for symbol in symbols:
+                    quote_asset = symbol.get('quoteAsset', 'UNKNOWN')
+                    quote_assets.add(quote_asset)
+                    symbol_count[quote_asset] = symbol_count.get(quote_asset, 0) + 1
+                
+                response = {
+                    "total_symbols": len(symbols),
+                    "available_quote_assets": sorted(list(quote_assets)),
+                    "symbol_count_by_quote": symbol_count,
+                    "sample_symbols": symbols[:10] if symbols else []
+                }
+                return [json.dumps(response, indent=2).encode()]
+            except Exception as e:
+                return [json.dumps({"error": str(e)}).encode()]
         
         elif path == '/screen':
             if not SCREENER_AVAILABLE:
@@ -137,7 +168,7 @@ def application(environ, start_response):
             response = {
                 "error": "Not found",
                 "path": path,
-                "available_endpoints": ["/", "/health", "/screen", "/static/crypto_screening.html"]
+                "available_endpoints": ["/", "/health", "/symbols", "/screen", "/static/crypto_screening.html"]
             }
             return [json.dumps(response).encode()]
     
