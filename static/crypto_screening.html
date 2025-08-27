@@ -316,7 +316,7 @@
                 const quoteCurrency = document.getElementById('quoteCurrency').value;
                 const limit = document.getElementById('analysisLimit').value;
                 
-                const response = await fetch(`/api/screen?quote_currency=${quoteCurrency}&limit=${limit}`);
+                const response = await fetch(`/screen?quote_currency=${quoteCurrency}&limit=${limit}`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
