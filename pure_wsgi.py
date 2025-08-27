@@ -111,7 +111,11 @@ def application(environ, start_response):
             
             # Get parameters
             quote_currency = query_params.get('quote_currency', 'USDT')
-            limit = min(int(query_params.get('limit', '10')), 20)  # Limit to 20 for cPanel
+            limit = int(query_params.get('limit', '999'))  # Default to all coins
+            
+            # Allow unlimited analysis but warn about performance
+            if limit > 500:
+                limit = 999  # Use 999 as "all" indicator
             
             try:
                 screener = TokocryptoScreener()

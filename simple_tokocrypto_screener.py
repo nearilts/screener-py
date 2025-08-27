@@ -137,37 +137,96 @@ class TokocryptoScreener:
         score = 0
         signals = []
         
+        # Calculate profit potential first
+        profit_potential = ((resistance - current_price) / current_price) * 100 if resistance > current_price else 0
+        
         # RSI oversold signal (good for bullish reversal)
-        if rsi < 35:
+        if rsi < 30:
+            score += 35
+            signals.append(f"RSI deeply oversold ({rsi:.1f}) - strong reversal potential")
+        elif rsi < 35:
             score += 25
-            signals.append(f"RSI oversold ({rsi})")
+            signals.append(f"RSI oversold ({rsi:.1f}) - reversal signal")
         elif rsi < 45:
             score += 15
-            signals.append(f"RSI moderately oversold ({rsi})")
+            signals.append(f"RSI recovering from oversold ({rsi:.1f})")
         
-        # Price near support
-        if current_price <= support * 1.02:
+        # Profit potential scoring
+        if profit_potential > 15:
+            score += 40
+            signals.append(f"Huge profit potential: +{profit_potential:.1f}% to resistance")
+        elif profit_potential > 10:
+            score += 30
+            signals.append(f"High profit potential: +{profit_potential:.1f}% to resistance")
+        elif profit_potential > 5:
             score += 20
-            signals.append("Price near support level")
+            signals.append(f"Good profit potential: +{profit_potential:.1f}% to resistance")
+        
+        # Price near support (buying opportunity)
+        if support > 0 and current_price <= support * 1.02:
+            score += 25
+            signals.append("Price near strong support - good entry zone")
+        elif support > 0 and current_price <= support * 1.05:
+            score += 15
+            signals.append("Price approaching support level")
         
         # Price below SMA (potential reversal)
-        if current_price < sma20 * 0.98:
+        if current_price < sma20 * 0.95:
+            score += 25
+            signals.append("Price significantly below SMA20 - oversold")
+        elif current_price < sma20 * 0.98:
             score += 15
-            signals.append("Price below SMA20")
+            signals.append("Price below SMA20 - potential bounce")
         
-        # Volume increase
-        if volume_ratio > 1.2:
+        # Volume analysis (momentum indicator)
+        if volume_ratio > 3.0:
+            score += 35
+            signals.append(f"Massive volume surge ({volume_ratio:.1f}x) - strong interest")
+        elif volume_ratio > 2.0:
+            score += 25
+            signals.append(f"Strong volume surge ({volume_ratio:.1f}x)")
+        elif volume_ratio > 1.5:
             score += 20
-            signals.append(f"Volume increase ({volume_ratio:.1f}x)")
+            signals.append(f"High volume ({volume_ratio:.1f}x)")
+        elif volume_ratio > 1.2:
+            score += 10
+            signals.append(f"Increased volume ({volume_ratio:.1f}x)")
         
-        # Recent price action
-        if len(closes) >= 3:
+        # Recent price action patterns
+        if len(closes) >= 5:
+            # Check for bullish reversal patterns
             if closes[-1] > closes[-2] and closes[-2] <= closes[-3]:
                 score += 20
-                signals.append("Bullish reversal pattern")
+                signals.append("Bullish reversal pattern detected")
+            
+            # Check for higher lows (bullish trend)
+            if closes[-2] > closes[-4] and closes[-1] > closes[-3]:
+                score += 15
+                signals.append("Higher lows pattern - uptrend forming")
+            
+            # Price consolidation near support
+            recent_range = max(closes[-3:]) - min(closes[-3:])
+            if recent_range / current_price < 0.02:  # Less than 2% range
+                score += 15
+                signals.append("Tight consolidation - potential breakout")
         
-        # Only return coins with decent signal strength
-        if score < 15:
+        # Risk/reward ratio calculation and scoring
+        if support > 0:
+            downside_risk = ((current_price - support) / current_price) * 100
+            if downside_risk > 0 and profit_potential > 0:
+                risk_reward = profit_potential / downside_risk
+                if risk_reward > 4:
+                    score += 25
+                    signals.append(f"Excellent risk/reward: {risk_reward:.1f}:1")
+                elif risk_reward > 2:
+                    score += 15
+                    signals.append(f"Good risk/reward: {risk_reward:.1f}:1")
+        
+        # Market cap bonus (prefer lower caps for higher volatility/profit potential)
+        # This would need market cap data, skipping for now
+        
+        # Only return coins with strong signal strength
+        if score < 30:  # Increased threshold for better quality
             return None
         
         # Calculate entry and take profit levels
