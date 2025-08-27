@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+# Removed StaticFiles to avoid aiofiles dependency
 import asyncio
 import logging
 from datetime import datetime
@@ -54,9 +54,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files if directory exists
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+# Serve static files manually without StaticFiles to avoid aiofiles dependency
+@app.get("/static/{filename:path}")
+async def serve_static(filename: str):
+    """Serve static files manually"""
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    file_path = os.path.join(static_dir, filename)
+    
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    else:
+        raise HTTPException(status_code=404, detail="File not found")
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
