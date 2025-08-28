@@ -945,9 +945,9 @@ class TokocryptoScreener:
                 quote_volume = float(ticker_data.get('quoteVolume', 0))
                 price_change_24h = float(ticker_data.get('priceChangePercent', 0))
                 
-                # Volume filter - relaksasi untuk mendapatkan lebih banyak hasil
-                if quote_volume < 10000:  # Turunkan drastis dari $100k ke $10k
-                    return None
+                # Volume filter - HAPUS untuk analisis semua coins
+                # if quote_volume < 10000:  # DISABLED - analyze all coins
+                #     return None
                 
                 # Analyze order book for buy/sell pressure (with fallback)
                 order_book_analysis = self.analyze_order_book(depth_data)
@@ -977,17 +977,17 @@ class TokocryptoScreener:
                 macd_line, signal_line = self.calculate_macd(closes)
                 sma_20 = sum(closes[-20:]) / 20
                 
-                # === POLA OVERSOLD REVERSAL DETECTION (RELAXED) ===
-                # 1. RSI Filter - lebih fleksibel
-                if rsi > 50:  # Relaksasi dari 40 ke 50
-                    return None
+                # === ANALISIS SEMUA COINS - HAPUS SEMUA FILTER ===
+                # 1. RSI Filter - DISABLED untuk analisis semua
+                # if rsi > 50:  # DISABLED
+                #     return None
                 
-                # 2. Minimum price decline - lebih fleksibel
+                # 2. Price decline filter - DISABLED untuk analisis semua
                 price_7d_ago = closes[-min(168, len(closes))]  # 7 hari = 168 jam
                 price_decline_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
                 
-                if price_decline_7d > -3:  # Relaksasi dari -7% ke -3%
-                    return None
+                # if price_decline_7d > -3:  # DISABLED
+                #     return None
                 
                 # 3. Volume sudah difilter di atas, skip filter kedua
                 
@@ -1017,69 +1017,97 @@ class TokocryptoScreener:
                 # Calculate potential profit
                 potential_profit = ((take_profit - entry_level) / entry_level) * 100
                 
-                # Minimum profit potential - VERY relaxed
-                if potential_profit < 2:  # Turunkan dari 5% ke 2%
-                    return None
+                # Minimum profit potential - DISABLED untuk analisis semua
+                # if potential_profit < 2:  # DISABLED
+                #     return None
                 
-                # === OVERSOLD REVERSAL SCORING SYSTEM ===
+                # === SCORING UNTUK SEMUA COINS - FOKUS PATTERN TURUN LALU NAIK ===
                 score = 0
                 
-                # RSI Oversold scoring (sangat penting)
+                # 1. RSI Oversold scoring (turun = bagus untuk reversal)
                 if rsi <= 20:
-                    score += 40  # Extremely oversold - perfect
-                elif rsi <= 25:
-                    score += 35  # Very oversold - excellent  
+                    score += 50  # Extremely oversold - perfect for reversal
                 elif rsi <= 30:
+                    score += 40  # Very oversold - excellent  
+                elif rsi <= 40:
                     score += 30  # Oversold - very good
-                elif rsi <= 35:
-                    score += 25  # Still oversold
+                elif rsi <= 50:
+                    score += 20  # Still good for reversal
+                elif rsi <= 60:
+                    score += 10  # Neutral
+                else:
+                    score += 5   # Overbought (not ideal but still analyze)
                 
-                # Price decline magnitude scoring (semakin turun semakin bagus untuk reversal)
-                if price_decline_7d <= -30:
-                    score += 25  # Massive drop - high reversal potential
+                # 2. Price decline scoring (semakin turun = semakin berpotensi naik)
+                if price_decline_7d <= -50:
+                    score += 40  # Massive crash - huge reversal potential
+                elif price_decline_7d <= -30:
+                    score += 35  # Big drop - high reversal potential
                 elif price_decline_7d <= -20:
-                    score += 20  # Big drop - good reversal potential
-                elif price_decline_7d <= -15:
-                    score += 15  # Significant drop
+                    score += 30  # Significant drop - good reversal
                 elif price_decline_7d <= -10:
-                    score += 10  # Minimum drop required
+                    score += 25  # Moderate drop - some reversal potential
+                elif price_decline_7d <= -5:
+                    score += 15  # Small drop - minimal reversal
+                elif price_decline_7d <= 0:
+                    score += 10  # Sideways - neutral
+                else:
+                    score += 5   # Rising (but we still analyze for momentum)
                 
-                # Support test scoring (price dekat support = bagus untuk bounce)
-                support_distance = ((current_price - recent_low) / recent_low) * 100
+                # 3. Support proximity scoring (dekat support = bagus untuk bounce)
+                support_distance = ((current_price - recent_low) / recent_low) * 100 if recent_low > 0 else 100
                 if support_distance <= 1:
-                    score += 20  # Very close to support
-                elif support_distance <= 2:
-                    score += 15  # Close to support
+                    score += 25  # Very close to support - perfect bounce zone
                 elif support_distance <= 3:
-                    score += 10  # Near support
+                    score += 20  # Close to support
+                elif support_distance <= 5:
+                    score += 15  # Near support
+                elif support_distance <= 10:
+                    score += 10  # Approaching support
+                else:
+                    score += 5   # Away from support but still analyze
                 
-                # Volume surge scoring (kapitulasi volume)
-                avg_volume = sum(volumes[-10:]) / 10
-                current_volume = volumes[-1]
-                if current_volume > avg_volume * 3:
-                    score += 20  # Massive volume surge (capitulation)
-                elif current_volume > avg_volume * 2:
-                    score += 15  # Big volume surge
-                elif current_volume > avg_volume * 1.5:
-                    score += 10  # High volume
+                # 4. Volume analysis (high volume during decline = capitulation)
+                avg_volume = sum(volumes[-10:]) / 10 if len(volumes) >= 10 else 1
+                current_volume = volumes[-1] if volumes else 1
+                volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
                 
-                # MACD momentum bonus
+                if volume_ratio > 5:
+                    score += 25  # Massive volume surge - likely capitulation
+                elif volume_ratio > 3:
+                    score += 20  # High volume surge
+                elif volume_ratio > 2:
+                    score += 15  # Increased volume
+                elif volume_ratio > 1.5:
+                    score += 10  # Above average volume
+                else:
+                    score += 5   # Normal/low volume but still analyze
+                
+                # 5. MACD momentum (early bullish signal)
                 if macd_improving:
-                    score += 15  # Momentum starting to improve
+                    score += 20  # Momentum turning bullish
+                else:
+                    score += 5   # No momentum but still analyze
                 
-                # Profit potential scoring
-                if potential_profit >= 20:
-                    score += 15  # Excellent profit potential
+                # 6. Profit potential scoring (realistic targets)
+                if potential_profit >= 25:
+                    score += 20  # Excellent profit potential
                 elif potential_profit >= 15:
-                    score += 12  
+                    score += 15  # Good profit potential
                 elif potential_profit >= 10:
-                    score += 8
-                elif potential_profit >= 8:
-                    score += 5
+                    score += 12  # Decent profit
+                elif potential_profit >= 5:
+                    score += 8   # Small profit
+                else:
+                    score += 5   # Any profit still analyzed
                 
-                # Minimum score - VERY relaxed
-                if score < 25:  # Turunkan dari 45 ke 25
-                    return None
+                # 7. Bonus untuk pattern yang ideal (turun drastis + oversold + dekat support)
+                if rsi <= 35 and price_decline_7d <= -15 and support_distance <= 5:
+                    score += 30  # Perfect reversal pattern bonus
+                
+                # Minimum score - DISABLED untuk analisis semua
+                # if score < 25:  # DISABLED
+                #     return None
                 
                 # Calculate stop loss (below recent low)
                 stop_loss = recent_low * 0.97  # 3% below recent low
@@ -1145,8 +1173,10 @@ class TokocryptoScreener:
                     signals.append(f"⚖️ Good risk/reward: {risk_reward:.1f}:1")
                 
                 processed_count += 1
-                print(f"🎯 FOUND OVERSOLD REVERSAL: {symbol}")
-                print(f"   RSI: {rsi:.1f} | 7d Drop: {price_decline_7d:.1f}% | Score: {score} | Profit: +{potential_profit:.1f}%")
+                if processed_count % 50 == 0:  # Progress every 50 symbols  
+                    print(f"🔄 Progress: {processed_count}/{len(filtered_symbols)} analyzed, found {len(results)} candidates so far...")
+                
+                print(f"✅ {symbol}: Score {score} | RSI {rsi:.1f} | 7d: {price_decline_7d:.1f}% | Profit: +{potential_profit:.1f}%")
                 
                 return {
                     'symbol': symbol,
@@ -1195,48 +1225,45 @@ class TokocryptoScreener:
                 if result:
                     results.append(result)
         
-        # Sort by potential profit (highest first)
-        results.sort(key=lambda x: x['potential_profit'], reverse=True)
+        # Sort by signal strength (highest score first) - yang paling berpotensi naik
+        results.sort(key=lambda x: x['signal_strength'], reverse=True)
+        
+        # LIMIT HASIL HANYA TOP 10 TERBAIK
+        top_results = results[:10]
         
         execution_time = time.time() - start_time
         
-        print(f"\n🔥 OVERSOLD REVERSAL ANALYSIS COMPLETE")
+        print(f"\n🔥 ANALISIS SEMUA COINS COMPLETE")
         print(f"⏱️  Execution Time: {execution_time:.2f} seconds")
         print(f"📊 Total Analyzed: {len(filtered_symbols)}")
-        print(f"🎯 Oversold Reversal Candidates Found: {len(results)}")
+        print(f"🎯 Total Candidates Found: {len(results)}")
+        print(f"🏆 Top 10 Best Candidates Returned")
         
-        if results:
-            print(f"\n🏆 TOP OVERSOLD REVERSAL CANDIDATES:")
-            for i, coin in enumerate(results[:5], 1):
-                print(f"{i}. {coin['symbol']}: RSI {coin['rsi']} | 7d Drop: {coin['price_decline_7d']}% | Profit: +{coin['potential_profit']}% | Score: {coin['signal_strength']}")
+        if top_results:
+            print(f"\n🏆 TOP 10 COINS (TURUN LALU BERPOTENSI NAIK):")
+            for i, coin in enumerate(top_results, 1):
+                print(f"{i}. {coin['symbol']}: Score {coin['signal_strength']} | RSI {coin['rsi']} | 7d: {coin['price_decline_7d']}% | Profit: +{coin['potential_profit']}%")
         else:
-            print(f"\n❌ No oversold reversal patterns found with current criteria:")
-            print(f"   - RSI ≤ 35 (extremely oversold)")
-            print(f"   - 7-day price decline ≥ 10%")
-            print(f"   - Price within 3% of recent low")
-            print(f"   - Daily volume ≥ $100k")
-            print(f"   - Minimum 8% profit potential")
+            print(f"\n❌ No candidates found after analyzing all coins")
         
         return {
             'status': 'success',
-            'analysis_type': 'oversold_reversal_analysis',
-            'data': results,
+            'analysis_type': 'all_coins_reversal_analysis',
+            'data': top_results,  # Hanya return top 10
             'execution_time': round(execution_time, 2),
             'total_analyzed': len(filtered_symbols),
-            'oversold_reversal_candidates': len(results),
+            'total_candidates_found': len(results),
+            'top_candidates_returned': len(top_results),
             'quote_currency': quote_currency,
             'criteria': {
-                'pattern_type': 'OVERSOLD REVERSAL (heavily relaxed for results)',
-                'rsi_requirement': 'RSI ≤ 50 (relaxed for more candidates)',
-                'price_decline': 'Minimum 3% decline in 7 days (very relaxed)',
-                'support_test': 'Disabled temporarily (was too restrictive)',
-                'volume_requirement': 'Minimum $10k daily volume (very relaxed)',
-                'profit_requirement': 'Minimum 2% profit potential (very relaxed)',
-                'scoring_system': 'Specialized 100-point system focusing on oversold conditions',
-                'minimum_score': '25+ points (heavily relaxed for results)',
+                'pattern_type': 'ALL COINS ANALYZED - Top 10 reversal candidates',
+                'filters': 'NO FILTERS - All coins analyzed regardless of RSI/decline/volume',
+                'scoring_focus': 'Coins that dropped and ready to rise (oversold + decline + support)',
+                'result_limit': 'Top 10 highest scoring candidates only',
+                'scoring_system': 'Comprehensive 200+ point system',
+                'sorted_by': 'Signal strength (reversal potential)',
                 'api_sources': 'Binance (klines, 24hr ticker) + Tokocrypto (depth, trades)',
-                'sorted_by': 'Profit percentage (highest first)',
-                'reversal_signals': 'RSI + price decline + volume analysis'
+                'analysis_approach': 'Analyze ALL -> Score ALL -> Return TOP 10'
             }
         }
 
