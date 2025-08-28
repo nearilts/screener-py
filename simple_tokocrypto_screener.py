@@ -854,17 +854,38 @@ class TokocryptoScreener:
         # Filter by quote currency and status
         filtered_symbols = []
         for symbol in all_symbols:
+            # Handle both Tokocrypto format (BTC_USDT) and Binance format (BTCUSDT) 
             symbol_name = symbol.get('symbol', '').upper()
             status = symbol.get('status', '').upper()
             
-            if (symbol_name.endswith(f'_{quote_currency}') or 
-                symbol_name.endswith(quote_currency)) and status == 'TRADING':
+            # For Binance symbols (no underscore)
+            if symbol_name.endswith(quote_currency) and status == 'TRADING':
+                # Make sure it actually ends with quote currency (not just contains it)
+                if symbol_name.endswith(f'{quote_currency}') and len(symbol_name) > len(quote_currency):
+                    filtered_symbols.append(symbol_name)
+            # For Tokocrypto symbols (with underscore)
+            elif symbol_name.endswith(f'_{quote_currency}') and status == 'TRADING':
                 filtered_symbols.append(symbol_name)
         
         if limit and limit < len(filtered_symbols):
             filtered_symbols = filtered_symbols[:limit]
         
-        print(f"📊 Analyzing {len(filtered_symbols)} {quote_currency} pairs...")
+        print(f"📊 Found {len(filtered_symbols)} {quote_currency} pairs to analyze...")
+        if len(filtered_symbols) == 0:
+            print(f"⚠️ No {quote_currency} pairs found! Available symbols format might be different.")
+            # Debug: show first 5 symbols to understand format
+            sample_symbols = [s.get('symbol', 'N/A') for s in all_symbols[:5]]
+            print(f"Sample symbols from API: {sample_symbols}")
+            return {
+                'status': 'error',
+                'message': f'No {quote_currency} trading pairs found. Check symbol format.',
+                'data': [],
+                'debug_info': {
+                    'total_symbols_from_api': len(all_symbols),
+                    'sample_symbols': sample_symbols,
+                    'quote_currency_searched': quote_currency
+                }
+            }
         
         results = []
         processed_count = 0
@@ -874,15 +895,18 @@ class TokocryptoScreener:
             try:
                 # Get enhanced market data from multiple sources
                 ticker_data = self.get_ticker_data(symbol)
+                if 'error' in ticker_data:
+                    print(f"⚠️ Failed to get ticker data for {symbol}: {ticker_data.get('error')}")
+                    return None
+                
+                # Try to get Tokocrypto data, but don't fail if unavailable
                 toko_ticker = self.get_tokocrypto_ticker(symbol)
                 depth_data = self.get_tokocrypto_depth(symbol)
                 recent_trades = self.get_tokocrypto_trades(symbol, 50)
                 
-                if 'error' in ticker_data:
-                    return None
-                
                 current_price = float(ticker_data.get('lastPrice', 0))
                 if current_price <= 0:
+                    print(f"⚠️ Invalid price for {symbol}: {current_price}")
                     return None
                 
                 # Enhanced volume analysis
@@ -894,8 +918,18 @@ class TokocryptoScreener:
                 if quote_volume < 100000:  # Minimum $100k daily volume
                     return None
                 
-                # Analyze order book for buy/sell pressure
+                # Analyze order book for buy/sell pressure (with fallback)
                 order_book_analysis = self.analyze_order_book(depth_data)
+                if not order_book_analysis or order_book_analysis.get('support', 0) == 0:
+                    # Fallback order book analysis if API fails
+                    order_book_analysis = {
+                        'buy_pressure': 50.0,  # Neutral
+                        'sell_pressure': 50.0,
+                        'support': current_price * 0.95,  # 5% below current price
+                        'resistance': current_price * 1.05,  # 5% above current price
+                        'bid_volume': 0,
+                        'ask_volume': 0
+                    }
                 
                 # Get kline data for technical analysis
                 klines = self.get_klines(symbol, '1h', 50)
@@ -1023,7 +1057,10 @@ class TokocryptoScreener:
                     signals.append(f"Great risk/reward ratio: {risk_reward:.1f}:1")
                 
                 processed_count += 1
-                print(f"✅ {processed_count}/{len(filtered_symbols)}: {symbol} - Score: {score}, RSI: {rsi:.1f}, Profit: +{potential_profit:.1f}%")
+                if processed_count % 10 == 0 or processed_count <= 5:
+                    print(f"✅ {processed_count}/{len(filtered_symbols)}: {symbol} - Score: {score}, RSI: {rsi:.1f}, Profit: +{potential_profit:.1f}%")
+                elif processed_count == len(filtered_symbols):
+                    print(f"✅ {processed_count}/{len(filtered_symbols)}: {symbol} - Score: {score}, RSI: {rsi:.1f}, Profit: +{potential_profit:.1f}%")
                 
                 return {
                     'symbol': symbol,
