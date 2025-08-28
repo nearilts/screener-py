@@ -48,6 +48,10 @@
                 <button onclick="analyzeSpecific()" class="bg-green-500 text-white px-6 py-2 rounded text-sm hover:bg-green-600 flex items-center">
                     📊 Analyze Specific
                 </button>
+                
+                <button onclick="startAccurateAnalysis()" id="accurateBtn" class="bg-purple-500 text-white px-6 py-2 rounded text-sm hover:bg-purple-600 flex items-center" title="Enhanced analysis with RSI < 50, MACD crossover, 5%+ profit potential, high volume, order book analysis">
+                    🎯 Accurate Bullish Analysis
+                </button>
             </div>
         </div>
 
@@ -111,6 +115,7 @@
                             <th class="text-left p-3 font-medium text-gray-700">Current Price</th>
                             <th class="text-left p-3 font-medium text-gray-700">RSI</th>
                             <th class="text-left p-3 font-medium text-gray-700">Signal</th>
+                            <th class="text-left p-3 font-medium text-gray-700">Buy Pressure</th>
                             <th class="text-left p-3 font-medium text-gray-700">Entry Level</th>
                             <th class="text-left p-3 font-medium text-gray-700">Take Profit</th>
                             <th class="text-left p-3 font-medium text-gray-700">Potential Profit</th>
@@ -271,7 +276,7 @@
             if (data.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" class="text-center p-8 text-gray-500">
+                        <td colspan="9" class="text-center p-8 text-gray-500">
                             <div class="text-4xl mb-2">🔍</div>
                             <div>No bullish signals found in current analysis</div>
                             <div class="text-sm mt-1">Try different parameters or check back later</div>
@@ -286,6 +291,22 @@
                     const entryPrice = item.entry_price || item.entry_level || item.current_price;
                     const takeProfit = item.take_profit || item.current_price * 1.05;
                     const profitPotential = item.profit_potential || item.potential_profit || 0;
+                    const buyPressure = item.analysis?.buy_pressure || null;
+                    
+                    // Format buy pressure display
+                    let buyPressureDisplay = 'N/A';
+                    let buyPressureClass = 'bg-gray-100 text-gray-800';
+                    
+                    if (buyPressure !== null && buyPressure !== undefined) {
+                        buyPressureDisplay = `${buyPressure.toFixed(1)}%`;
+                        if (buyPressure >= 60) {
+                            buyPressureClass = 'bg-green-100 text-green-800';
+                        } else if (buyPressure >= 55) {
+                            buyPressureClass = 'bg-yellow-100 text-yellow-800';
+                        } else {
+                            buyPressureClass = 'bg-red-100 text-red-800';
+                        }
+                    }
                     
                     return `
                         <tr class="border-b hover:bg-gray-50">
@@ -297,6 +318,11 @@
                                 </span>
                             </td>
                             <td class="p-3">${getSignalBadge(parseFloat(signalStrength))}</td>
+                            <td class="p-3">
+                                <span class="${buyPressureClass} px-2 py-1 rounded text-xs font-medium">
+                                    ${buyPressureDisplay}
+                                </span>
+                            </td>
                             <td class="p-3">${formatCurrency(parseFloat(entryPrice), item.symbol)}</td>
                             <td class="p-3">${formatCurrency(parseFloat(takeProfit), item.symbol)}</td>
                             <td class="p-3">
@@ -374,6 +400,55 @@
             } catch (error) {
                 console.error('Screening error:', error);
                 alert(`Analysis failed: ${error.message}`);
+            } finally {
+                showProgress(false);
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                isAnalyzing = false;
+            }
+        }
+
+        async function startAccurateAnalysis() {
+            if (isAnalyzing) return;
+            
+            isAnalyzing = true;
+            const btn = document.getElementById('accurateBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '🔄 Analyzing...';
+            btn.disabled = true;
+            
+            clearResults();
+            showProgress(true);
+            updateProgress("🎯 Starting accurate bullish analysis with advanced indicators...");
+            
+            try {
+                const quoteCurrency = document.getElementById('quoteCurrency').value;
+                const limit = document.getElementById('analysisLimit').value;
+                
+                updateProgress("📊 Fetching enhanced market data (24hr ticker, trades, depth)...");
+                
+                // Use new accurate analysis endpoint
+                const response = await fetch(`/accurate-analysis?quote_currency=${quoteCurrency}&limit=${limit}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                updateProgress("🧮 Processing RSI, MACD crossover, and volume analysis...");
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    updateProgress("✅ Accurate analysis complete! Displaying bullish candidates...");
+                    showSummary(result.data, result);
+                    displayResults(result.data);
+                } else {
+                    throw new Error(result.message || 'Accurate analysis failed');
+                }
+                
+            } catch (error) {
+                console.error('Accurate analysis error:', error);
+                alert(`Accurate analysis failed: ${error.message}`);
             } finally {
                 showProgress(false);
                 btn.innerHTML = originalText;

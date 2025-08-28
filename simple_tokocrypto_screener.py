@@ -52,6 +52,71 @@ class TokocryptoScreener:
         
         return self.make_request(url)
     
+    def get_tokocrypto_ticker(self, symbol: str) -> Dict:
+        """Get 24hr ticker data from Tokocrypto API"""
+        toko_symbol = symbol.replace('_', '').upper()
+        url = f"{self.tokocrypto_url}/market/ticker/24hr?symbol={toko_symbol}"
+        
+        return self.make_request(url)
+    
+    def get_tokocrypto_trades(self, symbol: str, limit: int = 100) -> List:
+        """Get recent trades from Tokocrypto API"""
+        toko_symbol = symbol.replace('_', '').upper()
+        url = f"{self.tokocrypto_url}/market/trades?symbol={toko_symbol}&limit={limit}"
+        
+        response = self.make_request(url)
+        if 'error' in response:
+            return []
+        
+        return response.get('data', [])
+    
+    def get_tokocrypto_agg_trades(self, symbol: str, limit: int = 100) -> List:
+        """Get aggregated trades from Tokocrypto API"""
+        toko_symbol = symbol.replace('_', '').upper()
+        url = f"{self.tokocrypto_url}/market/agg-trades?symbol={toko_symbol}&limit={limit}"
+        
+        response = self.make_request(url)
+        if 'error' in response:
+            return []
+        
+        return response.get('data', [])
+    
+    def get_tokocrypto_depth(self, symbol: str, limit: int = 100) -> Dict:
+        """Get order book depth from Tokocrypto API"""
+        toko_symbol = symbol.replace('_', '').upper()
+        url = f"{self.tokocrypto_url}/market/depth?symbol={toko_symbol}&limit={limit}"
+        
+        return self.make_request(url)
+    
+    def analyze_order_book(self, depth_data: Dict) -> Dict:
+        """Analyze order book for support/resistance and buy/sell pressure"""
+        if 'error' in depth_data or not depth_data.get('data'):
+            return {'buy_pressure': 0, 'sell_pressure': 0, 'support': 0, 'resistance': 0}
+        
+        data = depth_data['data']
+        bids = data.get('bids', [])
+        asks = data.get('asks', [])
+        
+        # Calculate buy/sell pressure
+        total_bid_volume = sum(float(bid[1]) for bid in bids[:10])  # Top 10 bids
+        total_ask_volume = sum(float(ask[1]) for ask in asks[:10])  # Top 10 asks
+        
+        buy_pressure = total_bid_volume / (total_bid_volume + total_ask_volume) * 100 if (total_bid_volume + total_ask_volume) > 0 else 50
+        sell_pressure = 100 - buy_pressure
+        
+        # Find support and resistance levels
+        support = float(bids[0][0]) if bids else 0  # Best bid
+        resistance = float(asks[0][0]) if asks else 0  # Best ask
+        
+        return {
+            'buy_pressure': round(buy_pressure, 2),
+            'sell_pressure': round(sell_pressure, 2),
+            'support': support,
+            'resistance': resistance,
+            'bid_volume': total_bid_volume,
+            'ask_volume': total_ask_volume
+        }
+    
     def get_klines(self, symbol: str, interval: str = '1h', limit: int = 100) -> List:
         """Get kline data for technical analysis - increased to 100 for better accuracy"""
         binance_symbol = symbol.replace('_', '')
@@ -765,6 +830,274 @@ class TokocryptoScreener:
                 'min_score': 40,  # Reduced for more results
                 'min_risk_reward': '1.2:1',  # More realistic
                 'profit_target': 'Any positive potential'
+            }
+        }
+
+    def accurate_bullish_analysis(self, quote_currency: str = 'USDT', limit: int = 50) -> Dict:
+        """
+        Enhanced accurate bullish analysis with strict criteria:
+        - Coins currently falling but ready for bullish reversal
+        - RSI below 50 (preferably 30-45)
+        - MACD showing bullish crossover or momentum improvement
+        - Minimum 5% profit potential
+        - High volume for faster movement
+        - Sorted by profit percentage (highest first)
+        """
+        print(f"🎯 Starting accurate bullish analysis for {quote_currency} pairs...")
+        start_time = time.time()
+        
+        # Get symbols
+        all_symbols = self.get_symbols()
+        if not all_symbols:
+            return {'status': 'error', 'message': 'Failed to fetch symbols', 'data': []}
+        
+        # Filter by quote currency and status
+        filtered_symbols = []
+        for symbol in all_symbols:
+            symbol_name = symbol.get('symbol', '').upper()
+            status = symbol.get('status', '').upper()
+            
+            if (symbol_name.endswith(f'_{quote_currency}') or 
+                symbol_name.endswith(quote_currency)) and status == 'TRADING':
+                filtered_symbols.append(symbol_name)
+        
+        if limit and limit < len(filtered_symbols):
+            filtered_symbols = filtered_symbols[:limit]
+        
+        print(f"📊 Analyzing {len(filtered_symbols)} {quote_currency} pairs...")
+        
+        results = []
+        processed_count = 0
+        
+        def analyze_symbol_accurate(symbol):
+            nonlocal processed_count
+            try:
+                # Get enhanced market data from multiple sources
+                ticker_data = self.get_ticker_data(symbol)
+                toko_ticker = self.get_tokocrypto_ticker(symbol)
+                depth_data = self.get_tokocrypto_depth(symbol)
+                recent_trades = self.get_tokocrypto_trades(symbol, 50)
+                
+                if 'error' in ticker_data:
+                    return None
+                
+                current_price = float(ticker_data.get('lastPrice', 0))
+                if current_price <= 0:
+                    return None
+                
+                # Enhanced volume analysis
+                volume = float(ticker_data.get('volume', 0))
+                quote_volume = float(ticker_data.get('quoteVolume', 0))
+                price_change_24h = float(ticker_data.get('priceChangePercent', 0))
+                
+                # Volume filter - must have significant volume for fast movement
+                if quote_volume < 100000:  # Minimum $100k daily volume
+                    return None
+                
+                # Analyze order book for buy/sell pressure
+                order_book_analysis = self.analyze_order_book(depth_data)
+                
+                # Get kline data for technical analysis
+                klines = self.get_klines(symbol, '1h', 50)
+                if not klines or len(klines) < 20:
+                    return None
+                
+                closes = [float(k[4]) for k in klines]
+                highs = [float(k[2]) for k in klines]
+                lows = [float(k[3]) for k in klines]
+                volumes = [float(k[5]) for k in klines]
+                
+                # Technical indicators
+                rsi = self.calculate_rsi(closes)
+                macd_line, signal_line = self.calculate_macd(closes)
+                sma_20 = sum(closes[-20:]) / 20
+                
+                # Strict filtering criteria
+                # 1. RSI below 50 (preferably 30-45 for oversold)
+                if rsi > 50:
+                    return None
+                
+                # 2. Must be falling (negative 24h change or below SMA20)
+                is_falling = price_change_24h < 0 or current_price < sma_20
+                if not is_falling:
+                    return None
+                
+                # 3. MACD improvement or crossover
+                macd_improving = False
+                if len(macd_line) >= 2 and len(signal_line) >= 2:
+                    # MACD bullish crossover or improving momentum
+                    macd_improving = (macd_line[-1] > signal_line[-1] or 
+                                    macd_line[-1] > macd_line[-2])
+                
+                # Enhanced support and resistance using order book
+                support = min(order_book_analysis['support'], min(lows[-10:]))
+                resistance = max(order_book_analysis['resistance'], max(highs[-10:]))
+                
+                # Entry and exit calculation
+                entry_level = current_price * 0.995  # Slight discount for entry
+                take_profit = min(resistance, current_price * 1.15)  # Max 15% or resistance
+                
+                # Calculate potential profit
+                potential_profit = ((take_profit - entry_level) / entry_level) * 100
+                
+                # 4. Minimum 5% profit potential
+                if potential_profit < 5:
+                    return None
+                
+                # Enhanced scoring with order book data
+                score = 0
+                
+                # RSI scoring (30-45 is optimal)
+                if 30 <= rsi <= 45:
+                    score += 25
+                elif rsi < 30:
+                    score += 20  # Very oversold
+                elif rsi < 50:
+                    score += 15
+                
+                # MACD scoring
+                if macd_improving:
+                    score += 20
+                
+                # Volume scoring
+                avg_volume = sum(volumes[-10:]) / 10
+                current_volume = volumes[-1]
+                if current_volume > avg_volume * 1.5:
+                    score += 20  # Very high volume
+                elif current_volume > avg_volume * 1.2:
+                    score += 15  # High volume
+                elif current_volume > avg_volume:
+                    score += 10
+                
+                # Order book pressure scoring
+                if order_book_analysis['buy_pressure'] > 60:
+                    score += 15  # Strong buying pressure
+                elif order_book_analysis['buy_pressure'] > 55:
+                    score += 10
+                
+                # Price position scoring
+                if current_price <= support * 1.02:  # Near support
+                    score += 15
+                
+                # Profit potential scoring
+                if potential_profit >= 10:
+                    score += 15
+                elif potential_profit >= 7:
+                    score += 10
+                elif potential_profit >= 5:
+                    score += 5
+                
+                # Minimum score requirement
+                if score < 60:
+                    return None
+                
+                # Calculate stop loss
+                stop_loss = support * 0.98
+                risk_reward = potential_profit / (((entry_level - stop_loss) / entry_level) * 100) if entry_level > stop_loss else 1
+                
+                # Generate enhanced trading signals
+                signals = []
+                if rsi <= 35:
+                    signals.append(f"RSI oversold at {rsi:.1f} - excellent reversal setup")
+                elif rsi <= 45:
+                    signals.append(f"RSI at {rsi:.1f} - good entry zone")
+                
+                if macd_improving:
+                    signals.append("MACD showing bullish momentum")
+                
+                if current_price <= support * 1.02:
+                    signals.append("Price near strong support level")
+                
+                if current_volume > avg_volume * 1.5:
+                    signals.append("Very high volume confirms strong interest")
+                elif current_volume > avg_volume * 1.2:
+                    signals.append("High volume confirms interest")
+                
+                if order_book_analysis['buy_pressure'] > 60:
+                    signals.append(f"Strong buy pressure: {order_book_analysis['buy_pressure']:.1f}%")
+                
+                if potential_profit >= 8:
+                    signals.append(f"Excellent profit potential: +{potential_profit:.1f}%")
+                
+                if risk_reward >= 2:
+                    signals.append(f"Great risk/reward ratio: {risk_reward:.1f}:1")
+                
+                processed_count += 1
+                print(f"✅ {processed_count}/{len(filtered_symbols)}: {symbol} - Score: {score}, RSI: {rsi:.1f}, Profit: +{potential_profit:.1f}%")
+                
+                return {
+                    'symbol': symbol,
+                    'current_price': current_price,
+                    'rsi': round(rsi, 2),
+                    'signal_strength': score,
+                    'entry_level': round(entry_level, 8),
+                    'take_profit': round(take_profit, 8),
+                    'potential_profit': round(potential_profit, 1),
+                    'trading_plan': f"Entry: {entry_level:.8f}, TP: {take_profit:.8f} (+{potential_profit:.1f}%), SL: {stop_loss:.8f}",
+                    'analysis': {
+                        'score': score,
+                        'rsi': round(rsi, 2),
+                        'sma20': round(sma_20, 8),
+                        'support': round(support, 8),
+                        'resistance': round(resistance, 8),
+                        'volume_ratio': round(current_volume / avg_volume, 2),
+                        'macd_improving': macd_improving,
+                        'price_change_24h': round(price_change_24h, 2),
+                        'risk_reward': round(risk_reward, 1),
+                        'buy_pressure': order_book_analysis['buy_pressure'],
+                        'sell_pressure': order_book_analysis['sell_pressure'],
+                        'signals': signals
+                    }
+                }
+                
+            except Exception as e:
+                print(f"❌ Error analyzing {symbol}: {str(e)}")
+                return None
+        
+        # Process symbols with threading for speed
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_symbol = {executor.submit(analyze_symbol_accurate, symbol): symbol 
+                              for symbol in filtered_symbols}
+            
+            for future in as_completed(future_to_symbol):
+                result = future.result()
+                if result:
+                    results.append(result)
+        
+        # Sort by potential profit (highest first)
+        results.sort(key=lambda x: x['potential_profit'], reverse=True)
+        
+        execution_time = time.time() - start_time
+        
+        print(f"\n🎯 ACCURATE BULLISH ANALYSIS COMPLETE")
+        print(f"⏱️  Execution Time: {execution_time:.2f} seconds")
+        print(f"📊 Total Analyzed: {len(filtered_symbols)}")
+        print(f"✅ Accurate Candidates Found: {len(results)}")
+        
+        if results:
+            print(f"\n🏆 TOP 3 ACCURATE CANDIDATES:")
+            for i, coin in enumerate(results[:3], 1):
+                print(f"{i}. {coin['symbol']}: +{coin['potential_profit']}% profit, RSI {coin['rsi']}, Score {coin['signal_strength']}")
+        
+        return {
+            'status': 'success',
+            'analysis_type': 'accurate_bullish_analysis',
+            'data': results,
+            'execution_time': round(execution_time, 2),
+            'total_analyzed': len(filtered_symbols),
+            'accurate_candidates': len(results),
+            'quote_currency': quote_currency,
+            'criteria': {
+                'rsi_requirement': 'RSI < 50 (preferably 30-45)',
+                'falling_requirement': 'Negative 24h change OR below SMA20',
+                'macd_requirement': 'MACD bullish crossover or improving momentum',
+                'profit_requirement': 'Minimum 5% profit potential',
+                'volume_requirement': 'Minimum $100k daily volume + high relative volume',
+                'order_book_requirement': 'Buy/sell pressure analysis from order book depth',
+                'api_sources': 'Binance (klines, 24hr ticker) + Tokocrypto (depth, trades, agg-trades)',
+                'min_score': 60,
+                'sorted_by': 'Profit percentage (highest first)',
+                'enhanced_features': 'Order book analysis, buy/sell pressure, enhanced volume filtering'
             }
         }
 

@@ -64,3 +64,21 @@ async def screen_cryptocurrencies(
             status_code=500,
             content={"status": "error", "message": str(e), "data": []}
         )
+
+@app.get("/accurate-analysis")
+async def accurate_bullish_analysis(
+    quote_currency: str = Query("USDT", description="Quote currency"),
+    limit: int = Query(50, description="Number of symbols to analyze")
+):
+    if not SCREENER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Screener service not available")
+    
+    try:
+        screener = TokocryptoScreener()
+        result = screener.accurate_bullish_analysis(quote_currency, limit)
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e), "data": []}
+        )
