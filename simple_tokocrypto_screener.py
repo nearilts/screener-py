@@ -806,7 +806,7 @@ class TokocryptoScreener:
                 except Exception as e:
                     print(f"❌ Error analyzing symbol: {e}")
         
-        # Sort by profit potential then by signal strength
+        # Sort by profit potential (highest first), then by signal strength
         results.sort(key=lambda x: (x['profit_potential'], x['signal_strength']), reverse=True)
         
         execution_time = time.time() - start_time
@@ -835,15 +835,16 @@ class TokocryptoScreener:
 
     def accurate_bullish_analysis(self, quote_currency: str = 'USDT', limit: int = 50) -> Dict:
         """
-        Enhanced accurate bullish analysis with strict criteria:
-        - Coins currently falling but ready for bullish reversal
-        - RSI below 50 (preferably 30-45)
-        - MACD showing bullish crossover or momentum improvement
-        - Minimum 5% profit potential
-        - High volume for faster movement
-        - Sorted by profit percentage (highest first)
+        Deteksi pola OVERSOLD REVERSAL seperti di chart:
+        - Harga sudah turun drastis (minimal -15% dalam 7 hari)
+        - RSI oversold (≤ 35, ideal 20-30)
+        - Price sudah mendekati support level
+        - Volume meningkat saat turun (kapitulasi)
+        - Ready untuk bounce/reversal bullish
+        - Pattern: Steep decline + oversold RSI + support test
         """
-        print(f"🎯 Starting accurate bullish analysis for {quote_currency} pairs...")
+        print(f"🎯 Mencari pola OVERSOLD REVERSAL untuk {quote_currency} pairs...")
+        print(f"📊 Target: Coins yang sudah turun drastis dan RSI oversold seperti gambar...")
         start_time = time.time()
         
         # Get symbols
@@ -972,147 +973,178 @@ class TokocryptoScreener:
                 macd_line, signal_line = self.calculate_macd(closes)
                 sma_20 = sum(closes[-20:]) / 20
                 
-                # Relaxed filtering criteria for better results
-                # 1. RSI below 65 (more flexible - include more coins)
-                if rsi > 65:
+                # === POLA OVERSOLD REVERSAL DETECTION ===
+                # 1. RSI HARUS OVERSOLD (seperti di gambar: RSI 26.24)
+                if rsi > 35:  # Hanya ambil yang benar-benar oversold
                     return None
                 
-                # 2. Volume filter - minimum daily volume (relaxed)
-                if quote_volume < 50000:  # Reduced from $100k to $50k
+                # 2. HARGA HARUS SUDAH TURUN DRASTIS dalam 7 hari terakhir
+                price_7d_ago = closes[-min(168, len(closes))]  # 7 hari = 168 jam
+                price_decline_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
+                
+                if price_decline_7d > -10:  # Harus turun minimal 10% dalam 7 hari
                     return None
                 
-                # Skip the "must be falling" requirement - focus on other signals instead
+                # 3. Volume harus signifikan (ada kapitulasi/panic selling)
+                if quote_volume < 100000:  # Minimum $100k untuk kapitulasi yang benar
+                    return None
                 
-                # 3. MACD improvement or crossover (keep this as good signal)
+                # 4. Price harus dekat support (test support level)
+                recent_low = min(lows[-24:])  # Low 24 jam terakhir
+                if current_price > recent_low * 1.03:  # Max 3% di atas recent low
+                    return None
+                
+                # 5. MACD untuk konfirmasi momentum (bonus points)
                 macd_improving = False
                 if len(macd_line) >= 2 and len(signal_line) >= 2:
                     macd_improving = (macd_line[-1] > signal_line[-1] or 
                                     macd_line[-1] > macd_line[-2])
                 
-                # Enhanced support and resistance using order book
-                support = min(order_book_analysis['support'], min(lows[-10:]))
+                # Enhanced support and resistance using order book + price action
+                support = min(order_book_analysis['support'], recent_low)
                 resistance = max(order_book_analysis['resistance'], max(highs[-10:]))
                 
-                # Entry and exit calculation
-                entry_level = current_price * 0.998  # Smaller discount
-                take_profit = min(resistance, current_price * 1.20)  # Allow up to 20% profit
+                # Entry dan target untuk oversold reversal
+                entry_level = current_price * 1.002  # Entry sedikit di atas current (wait for confirmation)
+                
+                # Target berdasarkan resistance terdekat atau 15-25% profit
+                target_resistance = resistance
+                target_percentage = current_price * 1.20  # 20% profit target
+                take_profit = min(target_resistance, target_percentage)
                 
                 # Calculate potential profit
                 potential_profit = ((take_profit - entry_level) / entry_level) * 100
                 
-                # 4. Minimum 3% profit potential (reduced from 5%)
-                if potential_profit < 3:
+                # Minimum 8% profit potential untuk oversold reversal
+                if potential_profit < 8:
                     return None
                 
-                # More flexible scoring system
+                # === OVERSOLD REVERSAL SCORING SYSTEM ===
                 score = 0
                 
-                # RSI scoring (now more flexible)
-                if rsi <= 30:
-                    score += 30  # Very oversold - excellent
-                elif rsi <= 40:
-                    score += 25  # Oversold - very good
-                elif rsi <= 50:
-                    score += 20  # Good entry zone
-                elif rsi <= 60:
-                    score += 15  # Still decent
-                else:
-                    score += 10  # Neutral
+                # RSI Oversold scoring (sangat penting)
+                if rsi <= 20:
+                    score += 40  # Extremely oversold - perfect
+                elif rsi <= 25:
+                    score += 35  # Very oversold - excellent  
+                elif rsi <= 30:
+                    score += 30  # Oversold - very good
+                elif rsi <= 35:
+                    score += 25  # Still oversold
                 
-                # MACD scoring
-                if macd_improving:
-                    score += 20
-                else:
-                    score += 5  # Still give some points
+                # Price decline magnitude scoring (semakin turun semakin bagus untuk reversal)
+                if price_decline_7d <= -30:
+                    score += 25  # Massive drop - high reversal potential
+                elif price_decline_7d <= -20:
+                    score += 20  # Big drop - good reversal potential
+                elif price_decline_7d <= -15:
+                    score += 15  # Significant drop
+                elif price_decline_7d <= -10:
+                    score += 10  # Minimum drop required
                 
-                # Volume scoring (more generous)
+                # Support test scoring (price dekat support = bagus untuk bounce)
+                support_distance = ((current_price - recent_low) / recent_low) * 100
+                if support_distance <= 1:
+                    score += 20  # Very close to support
+                elif support_distance <= 2:
+                    score += 15  # Close to support
+                elif support_distance <= 3:
+                    score += 10  # Near support
+                
+                # Volume surge scoring (kapitulasi volume)
                 avg_volume = sum(volumes[-10:]) / 10
                 current_volume = volumes[-1]
-                if current_volume > avg_volume * 2:
-                    score += 25  # Exceptional volume
+                if current_volume > avg_volume * 3:
+                    score += 20  # Massive volume surge (capitulation)
+                elif current_volume > avg_volume * 2:
+                    score += 15  # Big volume surge
                 elif current_volume > avg_volume * 1.5:
-                    score += 20  # Very high volume
-                elif current_volume > avg_volume * 1.2:
-                    score += 15  # High volume
-                elif current_volume > avg_volume:
-                    score += 10  # Above average
-                else:
-                    score += 5   # Give some points anyway
+                    score += 10  # High volume
                 
-                # Order book pressure scoring
-                if order_book_analysis['buy_pressure'] > 60:
-                    score += 15  # Strong buying pressure
-                elif order_book_analysis['buy_pressure'] > 55:
-                    score += 10
-                elif order_book_analysis['buy_pressure'] > 50:
-                    score += 5   # Neutral or slightly bullish
-                
-                # Price position scoring
-                if current_price <= support * 1.05:  # Near support (more flexible)
-                    score += 15
-                elif current_price <= sma_20 * 1.02:  # Near or below SMA20
-                    score += 10
+                # MACD momentum bonus
+                if macd_improving:
+                    score += 15  # Momentum starting to improve
                 
                 # Profit potential scoring
-                if potential_profit >= 15:
-                    score += 20  # Excellent profit
+                if potential_profit >= 20:
+                    score += 15  # Excellent profit potential
+                elif potential_profit >= 15:
+                    score += 12  
                 elif potential_profit >= 10:
-                    score += 15
-                elif potential_profit >= 7:
-                    score += 10
-                elif potential_profit >= 5:
                     score += 8
-                elif potential_profit >= 3:
+                elif potential_profit >= 8:
                     score += 5
                 
-                # 24h price change scoring (bonus for oversold conditions)
-                if price_change_24h < -5:
-                    score += 15  # Big drop - potential reversal
-                elif price_change_24h < -2:
-                    score += 10  # Moderate drop
-                elif price_change_24h < 0:
-                    score += 5   # Small drop
-                
-                # Minimum score requirement (reduced from 60 to 40)
-                if score < 40:
+                # Minimum score untuk oversold reversal (lebih ketat)
+                if score < 60:  # Higher minimum for quality
                     return None
                 
-                # Calculate stop loss
-                stop_loss = support * 0.98
+                # Calculate stop loss (below recent low)
+                stop_loss = recent_low * 0.97  # 3% below recent low
                 risk_reward = potential_profit / (((entry_level - stop_loss) / entry_level) * 100) if entry_level > stop_loss else 1
                 
-                # Generate enhanced trading signals
+                # Generate OVERSOLD REVERSAL signals
                 signals = []
-                if rsi <= 35:
-                    signals.append(f"RSI oversold at {rsi:.1f} - excellent reversal setup")
-                elif rsi <= 45:
-                    signals.append(f"RSI at {rsi:.1f} - good entry zone")
                 
+                # RSI signals
+                if rsi <= 20:
+                    signals.append(f"🔥 RSI extremely oversold at {rsi:.1f} - PERFECT reversal setup!")
+                elif rsi <= 25:
+                    signals.append(f"🔥 RSI very oversold at {rsi:.1f} - excellent reversal potential")
+                elif rsi <= 30:
+                    signals.append(f"🔥 RSI oversold at {rsi:.1f} - strong reversal candidate")
+                elif rsi <= 35:
+                    signals.append(f"⚡ RSI at {rsi:.1f} - oversold zone, good for reversal")
+                
+                # Price decline signals
+                if price_decline_7d <= -30:
+                    signals.append(f"📉 MASSIVE 7-day drop: {price_decline_7d:.1f}% - high reversal potential!")
+                elif price_decline_7d <= -20:
+                    signals.append(f"📉 Big 7-day drop: {price_decline_7d:.1f}% - good reversal setup")
+                elif price_decline_7d <= -15:
+                    signals.append(f"📉 Significant 7-day decline: {price_decline_7d:.1f}%")
+                elif price_decline_7d <= -10:
+                    signals.append(f"📉 7-day decline: {price_decline_7d:.1f}% - testing support")
+                
+                # Support test signals
+                if support_distance <= 1:
+                    signals.append(f"💪 At support level - ready to bounce ({support_distance:.1f}% above low)")
+                elif support_distance <= 2:
+                    signals.append(f"💪 Very close to support ({support_distance:.1f}% above low)")
+                elif support_distance <= 3:
+                    signals.append(f"💪 Near support level ({support_distance:.1f}% above low)")
+                
+                # Volume signals (kapitulasi)
+                if current_volume > avg_volume * 3:
+                    signals.append(f"🌊 MASSIVE volume surge: {current_volume/avg_volume:.1f}x - possible capitulation!")
+                elif current_volume > avg_volume * 2:
+                    signals.append(f"🌊 High volume surge: {current_volume/avg_volume:.1f}x - strong selling pressure")
+                elif current_volume > avg_volume * 1.5:
+                    signals.append(f"📊 Above average volume: {current_volume/avg_volume:.1f}x")
+                
+                # MACD momentum
                 if macd_improving:
-                    signals.append("MACD showing bullish momentum")
+                    signals.append("📈 MACD showing early bullish momentum - good timing!")
                 
-                if current_price <= support * 1.02:
-                    signals.append("Price near strong support level")
+                # Profit potential
+                if potential_profit >= 20:
+                    signals.append(f"🎯 Excellent profit target: +{potential_profit:.1f}%")
+                elif potential_profit >= 15:
+                    signals.append(f"🎯 Great profit potential: +{potential_profit:.1f}%")
+                elif potential_profit >= 10:
+                    signals.append(f"🎯 Good profit target: +{potential_profit:.1f}%")
+                elif potential_profit >= 8:
+                    signals.append(f"🎯 Decent profit potential: +{potential_profit:.1f}%")
                 
-                if current_volume > avg_volume * 1.5:
-                    signals.append("Very high volume confirms strong interest")
-                elif current_volume > avg_volume * 1.2:
-                    signals.append("High volume confirms interest")
-                
-                if order_book_analysis['buy_pressure'] > 60:
-                    signals.append(f"Strong buy pressure: {order_book_analysis['buy_pressure']:.1f}%")
-                
-                if potential_profit >= 8:
-                    signals.append(f"Excellent profit potential: +{potential_profit:.1f}%")
-                
-                if risk_reward >= 2:
-                    signals.append(f"Great risk/reward ratio: {risk_reward:.1f}:1")
+                # Risk/reward ratio
+                if risk_reward >= 3:
+                    signals.append(f"⚖️ Excellent risk/reward: {risk_reward:.1f}:1")
+                elif risk_reward >= 2:
+                    signals.append(f"⚖️ Good risk/reward: {risk_reward:.1f}:1")
                 
                 processed_count += 1
-                if processed_count % 10 == 0 or processed_count <= 5:
-                    print(f"✅ {processed_count}/{len(filtered_symbols)}: {symbol} - Score: {score}, RSI: {rsi:.1f}, Profit: +{potential_profit:.1f}%")
-                elif processed_count == len(filtered_symbols):
-                    print(f"✅ {processed_count}/{len(filtered_symbols)}: {symbol} - Score: {score}, RSI: {rsi:.1f}, Profit: +{potential_profit:.1f}%")
+                print(f"🎯 FOUND OVERSOLD REVERSAL: {symbol}")
+                print(f"   RSI: {rsi:.1f} | 7d Drop: {price_decline_7d:.1f}% | Score: {score} | Profit: +{potential_profit:.1f}%")
                 
                 return {
                     'symbol': symbol,
@@ -1122,13 +1154,21 @@ class TokocryptoScreener:
                     'entry_level': round(entry_level, 8),
                     'take_profit': round(take_profit, 8),
                     'potential_profit': round(potential_profit, 1),
-                    'trading_plan': f"Entry: {entry_level:.8f}, TP: {take_profit:.8f} (+{potential_profit:.1f}%), SL: {stop_loss:.8f}",
+                    'stop_loss': round(stop_loss, 8),
+                    'price_decline_7d': round(price_decline_7d, 1),
+                    'support_distance': round(support_distance, 1),
+                    'volume_ratio': round(current_volume / avg_volume, 2),
+                    'trading_plan': f"OVERSOLD REVERSAL: Entry {entry_level:.8f}, TP {take_profit:.8f} (+{potential_profit:.1f}%), SL {stop_loss:.8f}",
+                    'pattern_type': 'OVERSOLD_REVERSAL',
                     'analysis': {
                         'score': score,
                         'rsi': round(rsi, 2),
+                        'price_decline_7d': round(price_decline_7d, 1),
+                        'support_distance': round(support_distance, 1),
                         'sma20': round(sma_20, 8),
                         'support': round(support, 8),
                         'resistance': round(resistance, 8),
+                        'recent_low': round(recent_low, 8),
                         'volume_ratio': round(current_volume / avg_volume, 2),
                         'macd_improving': macd_improving,
                         'price_change_24h': round(price_change_24h, 2),
@@ -1158,34 +1198,43 @@ class TokocryptoScreener:
         
         execution_time = time.time() - start_time
         
-        print(f"\n🎯 ACCURATE BULLISH ANALYSIS COMPLETE")
+        print(f"\n🔥 OVERSOLD REVERSAL ANALYSIS COMPLETE")
         print(f"⏱️  Execution Time: {execution_time:.2f} seconds")
         print(f"📊 Total Analyzed: {len(filtered_symbols)}")
-        print(f"✅ Accurate Candidates Found: {len(results)}")
+        print(f"🎯 Oversold Reversal Candidates Found: {len(results)}")
         
         if results:
-            print(f"\n🏆 TOP 3 ACCURATE CANDIDATES:")
-            for i, coin in enumerate(results[:3], 1):
-                print(f"{i}. {coin['symbol']}: +{coin['potential_profit']}% profit, RSI {coin['rsi']}, Score {coin['signal_strength']}")
+            print(f"\n🏆 TOP OVERSOLD REVERSAL CANDIDATES:")
+            for i, coin in enumerate(results[:5], 1):
+                print(f"{i}. {coin['symbol']}: RSI {coin['rsi']} | 7d Drop: {coin['price_decline_7d']}% | Profit: +{coin['potential_profit']}% | Score: {coin['signal_strength']}")
+        else:
+            print(f"\n❌ No oversold reversal patterns found with current criteria:")
+            print(f"   - RSI ≤ 35 (extremely oversold)")
+            print(f"   - 7-day price decline ≥ 10%")
+            print(f"   - Price within 3% of recent low")
+            print(f"   - Daily volume ≥ $100k")
+            print(f"   - Minimum 8% profit potential")
         
         return {
             'status': 'success',
-            'analysis_type': 'accurate_bullish_analysis',
+            'analysis_type': 'oversold_reversal_analysis',
             'data': results,
             'execution_time': round(execution_time, 2),
             'total_analyzed': len(filtered_symbols),
-            'accurate_candidates': len(results),
+            'oversold_reversal_candidates': len(results),
             'quote_currency': quote_currency,
             'criteria': {
-                'rsi_requirement': 'RSI ≤ 65 (flexible - includes more opportunities)',
-                'volume_requirement': 'Minimum $50k daily volume (reduced for more results)',
-                'macd_bonus': 'MACD bullish crossover/momentum gives bonus points',
-                'profit_requirement': 'Minimum 3% profit potential (more realistic)',
-                'price_change_bonus': 'Recent price drops get bonus points (reversal potential)',
-                'scoring_system': 'Flexible 100-point system with 40+ minimum score',
-                'api_sources': 'Binance (klines, 24hr ticker) + Tokocrypto (depth, trades, agg-trades)',
+                'pattern_type': 'OVERSOLD REVERSAL (like chart example)',
+                'rsi_requirement': 'RSI ≤ 35 (extremely oversold like RSI 26.24 in chart)',
+                'price_decline': 'Minimum 10% decline in 7 days (steep drop like chart)',
+                'support_test': 'Price within 3% of recent low (testing support)',
+                'volume_requirement': 'Minimum $100k daily volume (capitulation volume)',
+                'profit_requirement': 'Minimum 8% profit potential to resistance',
+                'scoring_system': 'Specialized 100-point system focusing on oversold conditions',
+                'minimum_score': '60+ points (quality focused)',
+                'api_sources': 'Binance (klines, 24hr ticker) + Tokocrypto (depth, trades)',
                 'sorted_by': 'Profit percentage (highest first)',
-                'enhanced_features': 'Order book analysis, buy/sell pressure, volume analysis, oversold detection'
+                'reversal_signals': 'RSI oversold + price decline + support test + volume surge'
             }
         }
 
