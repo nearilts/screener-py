@@ -224,6 +224,39 @@ def application(environ, start_response):
                     }
                 }
                 return [json.dumps(error_response).encode()]
+                
+        elif path == '/dramatic-drops':
+            if not SCREENER_AVAILABLE:
+                status = '503 Service Unavailable'
+                headers = [('Content-Type', 'application/json')]
+                start_response(status, headers)
+                return [json.dumps({"error": "Screener not available", "path": current_dir}).encode()]
+            
+            status = '200 OK'
+            headers = [('Content-Type', 'application/json')]
+            start_response(status, headers)
+            
+            # Get parameters
+            quote_currency = query_params.get('quote_currency', 'USDT')
+            limit = int(query_params.get('limit', '900'))  # Analyze more symbols
+            
+            try:
+                screener = TokocryptoScreener()
+                result = screener.detect_dramatic_drops(quote_currency, limit)
+                return [json.dumps(result).encode()]
+            except Exception as e:
+                error_response = {
+                    "status": "error",
+                    "message": str(e),
+                    "data": [],
+                    "debug_info": {
+                        "python_version": sys.version,
+                        "current_dir": os.getcwd(),
+                        "screener_available": SCREENER_AVAILABLE,
+                        "endpoint": "/dramatic-drops"
+                    }
+                }
+                return [json.dumps(error_response).encode()]
         
         elif path.startswith('/static/'):
             # Serve static files

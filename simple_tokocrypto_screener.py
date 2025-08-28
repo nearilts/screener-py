@@ -833,6 +833,226 @@ class TokocryptoScreener:
             }
         }
 
+    def detect_dramatic_drops(self, quote_currency: str = 'USDT', limit: int = 900) -> Dict:
+        """
+        Deteksi coins yang turun drastis seperti gambar - menggunakan candlestick analysis
+        Mencari pola: High -> Low dengan RSI drop dan volume spike
+        """
+        print(f"🔍 DETECTING DRAMATIC DROPS untuk {quote_currency} pairs...")
+        print(f"📉 Mencari coins yang turun drastis seperti pattern di gambar...")
+        start_time = time.time()
+        
+        # Get symbols
+        all_symbols = self.get_symbols()
+        if not all_symbols:
+            return {'status': 'error', 'message': 'Failed to fetch symbols', 'data': []}
+        
+        # Filter symbols
+        filtered_symbols = []
+        for symbol in all_symbols:
+            symbol_name = symbol.get('symbol', '').upper()
+            if symbol_name.endswith(f'_{quote_currency}') or (symbol_name.endswith(quote_currency) and not symbol_name.endswith(f'_{quote_currency}')):
+                if len(symbol_name) > len(quote_currency):
+                    filtered_symbols.append(symbol_name)
+        
+        if limit and limit < len(filtered_symbols):
+            filtered_symbols = filtered_symbols[:limit]
+        
+        print(f"📊 Analyzing {len(filtered_symbols)} symbols for dramatic drops...")
+        
+        results = []
+        
+        def detect_drop_pattern(symbol):
+            try:
+                # Get longer timeframe for better pattern detection
+                klines = self.get_klines(symbol, '1h', 168)  # 7 days of hourly data
+                if not klines or len(klines) < 50:
+                    return None
+                
+                # Extract OHLCV data
+                opens = [float(k[1]) for k in klines]
+                highs = [float(k[2]) for k in klines]
+                lows = [float(k[3]) for k in klines]
+                closes = [float(k[4]) for k in klines]
+                volumes = [float(k[5]) for k in klines]
+                
+                current_price = closes[-1]
+                
+                # Calculate RSI for multiple periods
+                rsi_current = self.calculate_rsi(closes[-14:], 14) if len(closes) >= 14 else 50
+                rsi_24h_ago = self.calculate_rsi(closes[-38:-24], 14) if len(closes) >= 38 else 50
+                rsi_7d_ago = self.calculate_rsi(closes[-182:-168], 14) if len(closes) >= 182 else 50
+                
+                # Find recent high and low points
+                recent_high_24h = max(highs[-24:]) if len(highs) >= 24 else current_price
+                recent_low_24h = min(lows[-24:]) if len(lows) >= 24 else current_price
+                recent_high_7d = max(highs[-168:]) if len(highs) >= 168 else current_price
+                recent_low_7d = min(lows[-168:]) if len(lows) >= 168 else current_price
+                
+                # Calculate dramatic drop metrics
+                drop_from_24h_high = ((recent_high_24h - current_price) / recent_high_24h) * 100 if recent_high_24h > 0 else 0
+                drop_from_7d_high = ((recent_high_7d - current_price) / recent_high_7d) * 100 if recent_high_7d > 0 else 0
+                
+                # Volume analysis
+                avg_volume_7d = sum(volumes[-168:]) / 168 if len(volumes) >= 168 else 1
+                recent_volume_spike = max(volumes[-24:]) / avg_volume_7d if avg_volume_7d > 0 else 1
+                
+                # Pattern scoring - focus pada dramatic drops
+                pattern_score = 0
+                signals = []
+                
+                # 1. DRAMATIC DROP DETECTION (seperti gambar)
+                if drop_from_24h_high >= 8:  # Drop 8%+ dalam 24h
+                    pattern_score += 50
+                    signals.append(f"🔴 DRAMATIC 24h DROP: -{drop_from_24h_high:.1f}% from high!")
+                elif drop_from_24h_high >= 5:
+                    pattern_score += 30
+                    signals.append(f"📉 Significant 24h drop: -{drop_from_24h_high:.1f}%")
+                
+                if drop_from_7d_high >= 15:  # Drop 15%+ dalam 7 hari
+                    pattern_score += 40
+                    signals.append(f"🔴 MASSIVE 7d DROP: -{drop_from_7d_high:.1f}% from weekly high!")
+                elif drop_from_7d_high >= 10:
+                    pattern_score += 25
+                    signals.append(f"📉 Big 7d drop: -{drop_from_7d_high:.1f}%")
+                
+                # 2. RSI PATTERN (dari tinggi ke rendah)
+                rsi_drop = rsi_7d_ago - rsi_current if rsi_7d_ago > rsi_current else 0
+                if rsi_drop >= 30:  # RSI turun 30+ points
+                    pattern_score += 35
+                    signals.append(f"📊 MASSIVE RSI drop: {rsi_7d_ago:.1f} → {rsi_current:.1f} (-{rsi_drop:.1f})")
+                elif rsi_drop >= 20:
+                    pattern_score += 25
+                    signals.append(f"📊 Big RSI drop: {rsi_7d_ago:.1f} → {rsi_current:.1f}")
+                
+                if rsi_current <= 30:  # Now oversold
+                    pattern_score += 25
+                    signals.append(f"🔥 RSI now oversold: {rsi_current:.1f}")
+                elif rsi_current <= 40:
+                    pattern_score += 15
+                    signals.append(f"⚡ RSI approaching oversold: {rsi_current:.1f}")
+                
+                # 3. VOLUME SPIKE (panic selling)
+                if recent_volume_spike >= 3:
+                    pattern_score += 30
+                    signals.append(f"💥 VOLUME SPIKE: {recent_volume_spike:.1f}x average (panic selling!)")
+                elif recent_volume_spike >= 2:
+                    pattern_score += 20
+                    signals.append(f"📈 High volume: {recent_volume_spike:.1f}x average")
+                
+                # 4. NEAR RECENT LOW (testing support)
+                distance_from_low = ((current_price - recent_low_24h) / recent_low_24h) * 100 if recent_low_24h > 0 else 100
+                if distance_from_low <= 2:
+                    pattern_score += 25
+                    signals.append(f"💪 Very close to 24h low ({distance_from_low:.1f}% above)")
+                elif distance_from_low <= 5:
+                    pattern_score += 15
+                    signals.append(f"💪 Near 24h low ({distance_from_low:.1f}% above)")
+                
+                # 5. REVERSAL POTENTIAL
+                potential_bounce = ((recent_high_24h - current_price) / current_price) * 100 if current_price > 0 else 0
+                if potential_bounce >= 15:
+                    pattern_score += 20
+                    signals.append(f"🎯 HUGE bounce potential: +{potential_bounce:.1f}% to 24h high")
+                elif potential_bounce >= 10:
+                    pattern_score += 15
+                    signals.append(f"🎯 Good bounce potential: +{potential_bounce:.1f}%")
+                
+                # Hanya return yang benar-benar dramatic drops
+                if pattern_score < 50:  # Minimum score untuk dramatic pattern
+                    return None
+                
+                # Get ticker data untuk info tambahan
+                ticker_data = self.get_ticker_data(symbol)
+                price_change_24h = float(ticker_data.get('priceChangePercent', 0)) if 'error' not in ticker_data else 0
+                
+                return {
+                    'symbol': symbol,
+                    'current_price': current_price,
+                    'pattern_score': pattern_score,
+                    'drop_24h_high': round(drop_from_24h_high, 2),
+                    'drop_7d_high': round(drop_from_7d_high, 2),
+                    'rsi_current': round(rsi_current, 1),
+                    'rsi_drop': round(rsi_drop, 1),
+                    'volume_spike': round(recent_volume_spike, 1),
+                    'bounce_potential': round(potential_bounce, 1),
+                    'distance_from_low': round(distance_from_low, 1),
+                    'price_change_24h': round(price_change_24h, 1),
+                    'pattern_type': 'DRAMATIC_DROP',
+                    'levels': {
+                        'recent_high_24h': recent_high_24h,
+                        'recent_low_24h': recent_low_24h,
+                        'recent_high_7d': recent_high_7d,
+                        'recent_low_7d': recent_low_7d
+                    },
+                    'signals': signals,
+                    'trading_plan': f"DRAMATIC DROP: Current {current_price:.8f} | 24h High: {recent_high_24h:.8f} | Potential: +{potential_bounce:.1f}%"
+                }
+                
+            except Exception as e:
+                print(f"❌ Error analyzing {symbol}: {str(e)}")
+                return None
+        
+        # Process with threading
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_symbol = {executor.submit(detect_drop_pattern, symbol): symbol 
+                              for symbol in filtered_symbols}
+            
+            analyzed_count = 0
+            for future in as_completed(future_to_symbol):
+                try:
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                        print(f"🔴 FOUND DRAMATIC DROP: {result['symbol']} | Drop: -{result['drop_24h_high']:.1f}% | RSI: {result['rsi_current']:.1f} | Score: {result['pattern_score']}")
+                    
+                    analyzed_count += 1
+                    if analyzed_count % 100 == 0:
+                        print(f"🔄 Progress: {analyzed_count}/{len(filtered_symbols)} analyzed, {len(results)} dramatic drops found...")
+                        
+                except Exception as e:
+                    print(f"❌ Error in future: {e}")
+        
+        # Sort by pattern score (most dramatic first)
+        results.sort(key=lambda x: x['pattern_score'], reverse=True)
+        
+        # Return top 15 dramatic drops
+        top_results = results[:15]
+        
+        execution_time = time.time() - start_time
+        
+        print(f"\n🔴 DRAMATIC DROP DETECTION COMPLETE")
+        print(f"⏱️  Execution Time: {execution_time:.2f} seconds")
+        print(f"📊 Total Analyzed: {len(filtered_symbols)}")
+        print(f"🔴 Dramatic Drops Found: {len(results)}")
+        print(f"🏆 Top 15 Returned")
+        
+        if top_results:
+            print(f"\n🏆 TOP DRAMATIC DROPS (LIKE YOUR CHART):")
+            for i, coin in enumerate(top_results, 1):
+                print(f"{i}. {coin['symbol']}: -{coin['drop_24h_high']:.1f}% | RSI {coin['rsi_current']:.1f} | Vol: {coin['volume_spike']:.1f}x | Score: {coin['pattern_score']}")
+        
+        return {
+            'status': 'success',
+            'analysis_type': 'dramatic_drop_detection',
+            'data': top_results,
+            'execution_time': round(execution_time, 2),
+            'total_analyzed': len(filtered_symbols),
+            'dramatic_drops_found': len(results),
+            'top_drops_returned': len(top_results),
+            'quote_currency': quote_currency,
+            'criteria': {
+                'pattern_focus': 'Dramatic drops like chart example (high to low crash)',
+                'drop_requirements': '8%+ drop in 24h OR 15%+ drop in 7d',
+                'rsi_pattern': 'RSI falling from high to low (oversold preferred)',
+                'volume_requirement': 'Volume spike during drop (panic selling)',
+                'scoring_system': 'Pattern-based scoring focusing on dramatic movements',
+                'minimum_score': '50+ points for confirmed dramatic drops',
+                'result_limit': 'Top 15 most dramatic drops',
+                'sorted_by': 'Pattern score (most dramatic first)'
+            }
+        }
+
     def accurate_bullish_analysis(self, quote_currency: str = 'USDT', limit: int = 900) -> Dict:
         """
         Deteksi pola OVERSOLD REVERSAL seperti di chart:
