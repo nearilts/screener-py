@@ -972,20 +972,20 @@ class TokocryptoScreener:
                 macd_line, signal_line = self.calculate_macd(closes)
                 sma_20 = sum(closes[-20:]) / 20
                 
-                # Strict filtering criteria
-                # 1. RSI below 50 (preferably 30-45 for oversold)
-                if rsi > 50:
+                # Relaxed filtering criteria for better results
+                # 1. RSI below 65 (more flexible - include more coins)
+                if rsi > 65:
                     return None
                 
-                # 2. Must be falling (negative 24h change or below SMA20)
-                is_falling = price_change_24h < 0 or current_price < sma_20
-                if not is_falling:
+                # 2. Volume filter - minimum daily volume (relaxed)
+                if quote_volume < 50000:  # Reduced from $100k to $50k
                     return None
                 
-                # 3. MACD improvement or crossover
+                # Skip the "must be falling" requirement - focus on other signals instead
+                
+                # 3. MACD improvement or crossover (keep this as good signal)
                 macd_improving = False
                 if len(macd_line) >= 2 and len(signal_line) >= 2:
-                    # MACD bullish crossover or improving momentum
                     macd_improving = (macd_line[-1] > signal_line[-1] or 
                                     macd_line[-1] > macd_line[-2])
                 
@@ -994,61 +994,87 @@ class TokocryptoScreener:
                 resistance = max(order_book_analysis['resistance'], max(highs[-10:]))
                 
                 # Entry and exit calculation
-                entry_level = current_price * 0.995  # Slight discount for entry
-                take_profit = min(resistance, current_price * 1.15)  # Max 15% or resistance
+                entry_level = current_price * 0.998  # Smaller discount
+                take_profit = min(resistance, current_price * 1.20)  # Allow up to 20% profit
                 
                 # Calculate potential profit
                 potential_profit = ((take_profit - entry_level) / entry_level) * 100
                 
-                # 4. Minimum 5% profit potential
-                if potential_profit < 5:
+                # 4. Minimum 3% profit potential (reduced from 5%)
+                if potential_profit < 3:
                     return None
                 
-                # Enhanced scoring with order book data
+                # More flexible scoring system
                 score = 0
                 
-                # RSI scoring (30-45 is optimal)
-                if 30 <= rsi <= 45:
-                    score += 25
-                elif rsi < 30:
-                    score += 20  # Very oversold
-                elif rsi < 50:
-                    score += 15
+                # RSI scoring (now more flexible)
+                if rsi <= 30:
+                    score += 30  # Very oversold - excellent
+                elif rsi <= 40:
+                    score += 25  # Oversold - very good
+                elif rsi <= 50:
+                    score += 20  # Good entry zone
+                elif rsi <= 60:
+                    score += 15  # Still decent
+                else:
+                    score += 10  # Neutral
                 
                 # MACD scoring
                 if macd_improving:
                     score += 20
+                else:
+                    score += 5  # Still give some points
                 
-                # Volume scoring
+                # Volume scoring (more generous)
                 avg_volume = sum(volumes[-10:]) / 10
                 current_volume = volumes[-1]
-                if current_volume > avg_volume * 1.5:
+                if current_volume > avg_volume * 2:
+                    score += 25  # Exceptional volume
+                elif current_volume > avg_volume * 1.5:
                     score += 20  # Very high volume
                 elif current_volume > avg_volume * 1.2:
                     score += 15  # High volume
                 elif current_volume > avg_volume:
-                    score += 10
+                    score += 10  # Above average
+                else:
+                    score += 5   # Give some points anyway
                 
                 # Order book pressure scoring
                 if order_book_analysis['buy_pressure'] > 60:
                     score += 15  # Strong buying pressure
                 elif order_book_analysis['buy_pressure'] > 55:
                     score += 10
+                elif order_book_analysis['buy_pressure'] > 50:
+                    score += 5   # Neutral or slightly bullish
                 
                 # Price position scoring
-                if current_price <= support * 1.02:  # Near support
+                if current_price <= support * 1.05:  # Near support (more flexible)
                     score += 15
+                elif current_price <= sma_20 * 1.02:  # Near or below SMA20
+                    score += 10
                 
                 # Profit potential scoring
-                if potential_profit >= 10:
+                if potential_profit >= 15:
+                    score += 20  # Excellent profit
+                elif potential_profit >= 10:
                     score += 15
                 elif potential_profit >= 7:
                     score += 10
                 elif potential_profit >= 5:
+                    score += 8
+                elif potential_profit >= 3:
                     score += 5
                 
-                # Minimum score requirement
-                if score < 60:
+                # 24h price change scoring (bonus for oversold conditions)
+                if price_change_24h < -5:
+                    score += 15  # Big drop - potential reversal
+                elif price_change_24h < -2:
+                    score += 10  # Moderate drop
+                elif price_change_24h < 0:
+                    score += 5   # Small drop
+                
+                # Minimum score requirement (reduced from 60 to 40)
+                if score < 40:
                     return None
                 
                 # Calculate stop loss
@@ -1151,16 +1177,15 @@ class TokocryptoScreener:
             'accurate_candidates': len(results),
             'quote_currency': quote_currency,
             'criteria': {
-                'rsi_requirement': 'RSI < 50 (preferably 30-45)',
-                'falling_requirement': 'Negative 24h change OR below SMA20',
-                'macd_requirement': 'MACD bullish crossover or improving momentum',
-                'profit_requirement': 'Minimum 5% profit potential',
-                'volume_requirement': 'Minimum $100k daily volume + high relative volume',
-                'order_book_requirement': 'Buy/sell pressure analysis from order book depth',
+                'rsi_requirement': 'RSI ≤ 65 (flexible - includes more opportunities)',
+                'volume_requirement': 'Minimum $50k daily volume (reduced for more results)',
+                'macd_bonus': 'MACD bullish crossover/momentum gives bonus points',
+                'profit_requirement': 'Minimum 3% profit potential (more realistic)',
+                'price_change_bonus': 'Recent price drops get bonus points (reversal potential)',
+                'scoring_system': 'Flexible 100-point system with 40+ minimum score',
                 'api_sources': 'Binance (klines, 24hr ticker) + Tokocrypto (depth, trades, agg-trades)',
-                'min_score': 60,
                 'sorted_by': 'Profit percentage (highest first)',
-                'enhanced_features': 'Order book analysis, buy/sell pressure, enhanced volume filtering'
+                'enhanced_features': 'Order book analysis, buy/sell pressure, volume analysis, oversold detection'
             }
         }
 
