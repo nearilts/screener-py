@@ -854,18 +854,27 @@ class TokocryptoScreener:
         # Filter by quote currency and status
         filtered_symbols = []
         for symbol in all_symbols:
-            # Handle both Tokocrypto format (BTC_USDT) and Binance format (BTCUSDT) 
             symbol_name = symbol.get('symbol', '').upper()
-            status = symbol.get('status', '').upper()
+            status = symbol.get('status', '')
             
-            # For Binance symbols (no underscore)
-            if symbol_name.endswith(quote_currency) and status == 'TRADING':
-                # Make sure it actually ends with quote currency (not just contains it)
-                if symbol_name.endswith(f'{quote_currency}') and len(symbol_name) > len(quote_currency):
+            # Debug: Print first few symbols to understand the data structure
+            if len(filtered_symbols) == 0 and len(all_symbols) > 0:
+                print(f"🔍 Sample symbol data: {symbol}")
+            
+            # Check if symbol ends with the quote currency
+            if symbol_name.endswith(f'_{quote_currency}'):
+                # Check status - try different possible status values
+                if status in ['TRADING', 'trading', 'Trading', 'ACTIVE', 'active', 'Active']:
                     filtered_symbols.append(symbol_name)
-            # For Tokocrypto symbols (with underscore)
-            elif symbol_name.endswith(f'_{quote_currency}') and status == 'TRADING':
-                filtered_symbols.append(symbol_name)
+                elif not status:  # If no status field, assume trading
+                    filtered_symbols.append(symbol_name)
+            elif symbol_name.endswith(quote_currency) and not symbol_name.endswith(f'_{quote_currency}'):
+                # Handle Binance format (BTCUSDT) if also present
+                if len(symbol_name) > len(quote_currency):  # Ensure it's not just the quote currency itself
+                    if status in ['TRADING', 'trading', 'Trading', 'ACTIVE', 'active', 'Active']:
+                        filtered_symbols.append(symbol_name)
+                    elif not status:
+                        filtered_symbols.append(symbol_name)
         
         if limit and limit < len(filtered_symbols):
             filtered_symbols = filtered_symbols[:limit]
@@ -873,17 +882,34 @@ class TokocryptoScreener:
         print(f"📊 Found {len(filtered_symbols)} {quote_currency} pairs to analyze...")
         if len(filtered_symbols) == 0:
             print(f"⚠️ No {quote_currency} pairs found! Available symbols format might be different.")
-            # Debug: show first 5 symbols to understand format
-            sample_symbols = [s.get('symbol', 'N/A') for s in all_symbols[:5]]
+            # Debug: show first 10 symbols to understand format and status
+            sample_symbols = []
+            for i, symbol in enumerate(all_symbols[:10]):
+                symbol_name = symbol.get('symbol', 'N/A')
+                status = symbol.get('status', 'N/A')
+                sample_symbols.append(f"{symbol_name} (status: {status})")
+            
             print(f"Sample symbols from API: {sample_symbols}")
+            
+            # Count symbols by quote currency to help debug
+            quote_counts = {}
+            for symbol in all_symbols:
+                symbol_name = symbol.get('symbol', '')
+                if '_' in symbol_name:
+                    quote = symbol_name.split('_')[-1]
+                    quote_counts[quote] = quote_counts.get(quote, 0) + 1
+            
+            print(f"Quote currency distribution: {dict(sorted(quote_counts.items(), key=lambda x: x[1], reverse=True)[:10])}")
+            
             return {
                 'status': 'error',
                 'message': f'No {quote_currency} trading pairs found. Check symbol format.',
                 'data': [],
                 'debug_info': {
                     'total_symbols_from_api': len(all_symbols),
-                    'sample_symbols': sample_symbols,
-                    'quote_currency_searched': quote_currency
+                    'sample_symbols_with_status': sample_symbols,
+                    'quote_currency_searched': quote_currency,
+                    'top_quote_currencies': quote_counts
                 }
             }
         
