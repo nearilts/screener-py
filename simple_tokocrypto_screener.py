@@ -881,6 +881,10 @@ class TokocryptoScreener:
             filtered_symbols = filtered_symbols[:limit]
         
         print(f"📊 Found {len(filtered_symbols)} {quote_currency} pairs to analyze...")
+        print(f"🔍 First 10 symbols: {filtered_symbols[:10]}")
+        print(f"🎯 Limit set to: {limit}")
+        print(f"📈 Will analyze: {min(len(filtered_symbols), limit) if limit else len(filtered_symbols)} symbols")
+        
         if len(filtered_symbols) == 0:
             print(f"⚠️ No {quote_currency} pairs found! Available symbols format might be different.")
             # Debug: show first 10 symbols to understand format and status
@@ -941,8 +945,8 @@ class TokocryptoScreener:
                 quote_volume = float(ticker_data.get('quoteVolume', 0))
                 price_change_24h = float(ticker_data.get('priceChangePercent', 0))
                 
-                # Volume filter - must have significant volume for fast movement
-                if quote_volume < 100000:  # Minimum $100k daily volume
+                # Volume filter - relaksasi untuk mendapatkan lebih banyak hasil
+                if quote_volume < 10000:  # Turunkan drastis dari $100k ke $10k
                     return None
                 
                 # Analyze order book for buy/sell pressure (with fallback)
@@ -973,26 +977,24 @@ class TokocryptoScreener:
                 macd_line, signal_line = self.calculate_macd(closes)
                 sma_20 = sum(closes[-20:]) / 20
                 
-                # === POLA OVERSOLD REVERSAL DETECTION ===
-                # 1. RSI HARUS OVERSOLD (relaksasi sedikit untuk mendapatkan hasil)
-                if rsi > 40:  # Relaksasi dari 35 ke 40
+                # === POLA OVERSOLD REVERSAL DETECTION (RELAXED) ===
+                # 1. RSI Filter - lebih fleksibel
+                if rsi > 50:  # Relaksasi dari 40 ke 50
                     return None
                 
-                # 2. HARGA HARUS SUDAH TURUN dalam 7 hari terakhir
+                # 2. Minimum price decline - lebih fleksibel
                 price_7d_ago = closes[-min(168, len(closes))]  # 7 hari = 168 jam
                 price_decline_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
                 
-                if price_decline_7d > -7:  # Relaksasi dari -10% ke -7%
+                if price_decline_7d > -3:  # Relaksasi dari -7% ke -3%
                     return None
                 
-                # 3. Volume harus signifikan (relaksasi untuk mendapatkan lebih banyak hasil)
-                if quote_volume < 50000:  # Relaksasi dari $100k ke $50k
-                    return None
+                # 3. Volume sudah difilter di atas, skip filter kedua
                 
-                # 4. Price harus relatif dekat support (relaksasi)
+                # 4. Skip support distance filter untuk sementara - terlalu ketat
                 recent_low = min(lows[-24:])  # Low 24 jam terakhir
-                if current_price > recent_low * 1.08:  # Relaksasi dari 3% ke 8% di atas recent low
-                    return None
+                # if current_price > recent_low * 1.15:  # Disabled temporarily
+                #     return None
                 
                 # 5. MACD untuk konfirmasi momentum (bonus points)
                 macd_improving = False
@@ -1015,8 +1017,8 @@ class TokocryptoScreener:
                 # Calculate potential profit
                 potential_profit = ((take_profit - entry_level) / entry_level) * 100
                 
-                # Minimum profit potential untuk oversold reversal (relaksasi)
-                if potential_profit < 5:  # Turunkan dari 8% ke 5%
+                # Minimum profit potential - VERY relaxed
+                if potential_profit < 2:  # Turunkan dari 5% ke 2%
                     return None
                 
                 # === OVERSOLD REVERSAL SCORING SYSTEM ===
@@ -1075,8 +1077,8 @@ class TokocryptoScreener:
                 elif potential_profit >= 8:
                     score += 5
                 
-                # Minimum score untuk oversold reversal (relaksasi untuk mendapatkan hasil)
-                if score < 45:  # Turunkan dari 60 ke 45
+                # Minimum score - VERY relaxed
+                if score < 25:  # Turunkan dari 45 ke 25
                     return None
                 
                 # Calculate stop loss (below recent low)
@@ -1224,17 +1226,17 @@ class TokocryptoScreener:
             'oversold_reversal_candidates': len(results),
             'quote_currency': quote_currency,
             'criteria': {
-                'pattern_type': 'OVERSOLD REVERSAL (relaxed for more results)',
-                'rsi_requirement': 'RSI ≤ 40 (oversold - relaxed from 35)',
-                'price_decline': 'Minimum 7% decline in 7 days (relaxed from 10%)',
-                'support_test': 'Price within 8% of recent low (relaxed from 3%)',
-                'volume_requirement': 'Minimum $50k daily volume (relaxed from $100k)',
-                'profit_requirement': 'Minimum 5% profit potential (relaxed from 8%)',
+                'pattern_type': 'OVERSOLD REVERSAL (heavily relaxed for results)',
+                'rsi_requirement': 'RSI ≤ 50 (relaxed for more candidates)',
+                'price_decline': 'Minimum 3% decline in 7 days (very relaxed)',
+                'support_test': 'Disabled temporarily (was too restrictive)',
+                'volume_requirement': 'Minimum $10k daily volume (very relaxed)',
+                'profit_requirement': 'Minimum 2% profit potential (very relaxed)',
                 'scoring_system': 'Specialized 100-point system focusing on oversold conditions',
-                'minimum_score': '45+ points (relaxed from 60 for more results)',
+                'minimum_score': '25+ points (heavily relaxed for results)',
                 'api_sources': 'Binance (klines, 24hr ticker) + Tokocrypto (depth, trades)',
                 'sorted_by': 'Profit percentage (highest first)',
-                'reversal_signals': 'RSI oversold + price decline + support test + volume surge'
+                'reversal_signals': 'RSI + price decline + volume analysis'
             }
         }
 
