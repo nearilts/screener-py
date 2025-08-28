@@ -243,6 +243,12 @@
         }
 
         function updateProgress(current, total, symbol = '') {
+            if (typeof current === 'string') {
+                // Handle string message for progress
+                document.getElementById('currentSymbol').textContent = current;
+                return;
+            }
+            
             const percentage = Math.round((current / total) * 100);
             document.getElementById('progressBar').style.width = `${percentage}%`;
             document.getElementById('progressPercent').textContent = `${percentage}%`;
@@ -412,12 +418,16 @@
             if (isAnalyzing) return;
             
             isAnalyzing = true;
+            startTime = Date.now();
             const btn = document.getElementById('accurateBtn');
             const originalText = btn.innerHTML;
             btn.innerHTML = '🔄 Analyzing...';
             btn.disabled = true;
             
-            clearResults();
+            // Hide previous results
+            document.getElementById('resultsContainer').classList.add('hidden');
+            document.getElementById('summaryContainer').classList.add('hidden');
+            
             showProgress(true);
             updateProgress("🎯 Starting accurate bullish analysis with advanced indicators...");
             
