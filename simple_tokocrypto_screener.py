@@ -833,7 +833,7 @@ class TokocryptoScreener:
             }
         }
 
-    def accurate_bullish_analysis(self, quote_currency: str = 'USDT', limit: int = 50) -> Dict:
+    def accurate_bullish_analysis(self, quote_currency: str = 'USDT', limit: int = 900) -> Dict:
         """
         Deteksi pola OVERSOLD REVERSAL seperti di chart:
         - Harga sudah turun drastis (minimal -15% dalam 7 hari)
@@ -974,24 +974,24 @@ class TokocryptoScreener:
                 sma_20 = sum(closes[-20:]) / 20
                 
                 # === POLA OVERSOLD REVERSAL DETECTION ===
-                # 1. RSI HARUS OVERSOLD (seperti di gambar: RSI 26.24)
-                if rsi > 35:  # Hanya ambil yang benar-benar oversold
+                # 1. RSI HARUS OVERSOLD (relaksasi sedikit untuk mendapatkan hasil)
+                if rsi > 40:  # Relaksasi dari 35 ke 40
                     return None
                 
-                # 2. HARGA HARUS SUDAH TURUN DRASTIS dalam 7 hari terakhir
+                # 2. HARGA HARUS SUDAH TURUN dalam 7 hari terakhir
                 price_7d_ago = closes[-min(168, len(closes))]  # 7 hari = 168 jam
                 price_decline_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
                 
-                if price_decline_7d > -10:  # Harus turun minimal 10% dalam 7 hari
+                if price_decline_7d > -7:  # Relaksasi dari -10% ke -7%
                     return None
                 
-                # 3. Volume harus signifikan (ada kapitulasi/panic selling)
-                if quote_volume < 100000:  # Minimum $100k untuk kapitulasi yang benar
+                # 3. Volume harus signifikan (relaksasi untuk mendapatkan lebih banyak hasil)
+                if quote_volume < 50000:  # Relaksasi dari $100k ke $50k
                     return None
                 
-                # 4. Price harus dekat support (test support level)
+                # 4. Price harus relatif dekat support (relaksasi)
                 recent_low = min(lows[-24:])  # Low 24 jam terakhir
-                if current_price > recent_low * 1.03:  # Max 3% di atas recent low
+                if current_price > recent_low * 1.08:  # Relaksasi dari 3% ke 8% di atas recent low
                     return None
                 
                 # 5. MACD untuk konfirmasi momentum (bonus points)
@@ -1015,8 +1015,8 @@ class TokocryptoScreener:
                 # Calculate potential profit
                 potential_profit = ((take_profit - entry_level) / entry_level) * 100
                 
-                # Minimum 8% profit potential untuk oversold reversal
-                if potential_profit < 8:
+                # Minimum profit potential untuk oversold reversal (relaksasi)
+                if potential_profit < 5:  # Turunkan dari 8% ke 5%
                     return None
                 
                 # === OVERSOLD REVERSAL SCORING SYSTEM ===
@@ -1075,8 +1075,8 @@ class TokocryptoScreener:
                 elif potential_profit >= 8:
                     score += 5
                 
-                # Minimum score untuk oversold reversal (lebih ketat)
-                if score < 60:  # Higher minimum for quality
+                # Minimum score untuk oversold reversal (relaksasi untuk mendapatkan hasil)
+                if score < 45:  # Turunkan dari 60 ke 45
                     return None
                 
                 # Calculate stop loss (below recent low)
@@ -1224,14 +1224,14 @@ class TokocryptoScreener:
             'oversold_reversal_candidates': len(results),
             'quote_currency': quote_currency,
             'criteria': {
-                'pattern_type': 'OVERSOLD REVERSAL (like chart example)',
-                'rsi_requirement': 'RSI ≤ 35 (extremely oversold like RSI 26.24 in chart)',
-                'price_decline': 'Minimum 10% decline in 7 days (steep drop like chart)',
-                'support_test': 'Price within 3% of recent low (testing support)',
-                'volume_requirement': 'Minimum $100k daily volume (capitulation volume)',
-                'profit_requirement': 'Minimum 8% profit potential to resistance',
+                'pattern_type': 'OVERSOLD REVERSAL (relaxed for more results)',
+                'rsi_requirement': 'RSI ≤ 40 (oversold - relaxed from 35)',
+                'price_decline': 'Minimum 7% decline in 7 days (relaxed from 10%)',
+                'support_test': 'Price within 8% of recent low (relaxed from 3%)',
+                'volume_requirement': 'Minimum $50k daily volume (relaxed from $100k)',
+                'profit_requirement': 'Minimum 5% profit potential (relaxed from 8%)',
                 'scoring_system': 'Specialized 100-point system focusing on oversold conditions',
-                'minimum_score': '60+ points (quality focused)',
+                'minimum_score': '45+ points (relaxed from 60 for more results)',
                 'api_sources': 'Binance (klines, 24hr ticker) + Tokocrypto (depth, trades)',
                 'sorted_by': 'Profit percentage (highest first)',
                 'reversal_signals': 'RSI oversold + price decline + support test + volume surge'
