@@ -769,12 +769,12 @@
         });
 
         // Auto-refresh every 5 minutes if results are showing
-        setInterval(() => {
-            if (!isAnalyzing && !document.getElementById('resultsContainer').classList.contains('hidden')) {
-                console.log('Auto-refreshing screening results...');
-                startScreening();
-            }
-        }, 5 * 60 * 1000);
+        // setInterval(() => {
+        //     if (!isAnalyzing && !document.getElementById('resultsContainer').classList.contains('hidden')) {
+        //         console.log('Auto-refreshing screening results...');
+        //         startScreening();
+        //     }
+        // }, 5 * 60 * 1000);
 
         // Detail Modal Functions
         function showDetailModal(symbol, data) {
