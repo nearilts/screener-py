@@ -833,6 +833,285 @@ class TokocryptoScreener:
             }
         }
 
+    def analyze_portfolio(self, api_key: str, private_key: str, quote_currency: str = 'USDT') -> Dict:
+        """
+        Analyze user's portfolio holdings and calculate profits/losses
+        Requires Tokocrypto API credentials
+        """
+        print(f"📊 Starting portfolio analysis...")
+        start_time = time.time()
+        
+        if not api_key or not private_key:
+            return {
+                'status': 'error',
+                'message': 'API Key and Private Key are required',
+                'data': []
+            }
+        
+        try:
+            # Get user's account information and balances
+            portfolio_data = self.get_user_portfolio(api_key, private_key)
+            if 'error' in portfolio_data:
+                return {
+                    'status': 'error',
+                    'message': f'Failed to fetch portfolio: {portfolio_data["error"]}',
+                    'data': []
+                }
+            
+            # Get trading history for profit calculation
+            trade_history = self.get_trade_history(api_key, private_key)
+            
+            portfolio_analysis = []
+            total_portfolio_value = 0
+            total_invested = 0
+            total_profit_loss = 0
+            
+            # Analyze each holding
+            for holding in portfolio_data.get('balances', []):
+                asset = holding.get('asset', '')
+                free_balance = float(holding.get('free', 0))
+                locked_balance = float(holding.get('locked', 0))
+                total_balance = free_balance + locked_balance
+                
+                # Skip assets with zero balance
+                if total_balance <= 0:
+                    continue
+                
+                # Skip quote currency (USDT) for profit calculation
+                if asset == quote_currency:
+                    total_portfolio_value += total_balance
+                    continue
+                
+                # Get current price
+                symbol = f"{asset}_{quote_currency}"
+                ticker_data = self.get_ticker_data(symbol)
+                
+                if 'error' in ticker_data:
+                    print(f"⚠️ Could not get price for {symbol}")
+                    continue
+                
+                current_price = float(ticker_data.get('lastPrice', 0))
+                current_value = total_balance * current_price
+                
+                # Calculate average buy price and total invested from trade history
+                avg_buy_price, total_bought, total_sold = self.calculate_average_buy_price(
+                    trade_history, asset, quote_currency
+                )
+                
+                # Calculate profit/loss
+                if avg_buy_price > 0:
+                    invested_amount = total_balance * avg_buy_price
+                    profit_loss = current_value - invested_amount
+                    profit_loss_percent = (profit_loss / invested_amount) * 100 if invested_amount > 0 else 0
+                else:
+                    invested_amount = 0
+                    profit_loss = 0
+                    profit_loss_percent = 0
+                
+                # Get 24h price change
+                price_change_24h = float(ticker_data.get('priceChangePercent', 0))
+                
+                # Calculate daily P&L
+                daily_pnl = (current_value * price_change_24h) / 100
+                
+                holding_analysis = {
+                    'asset': asset,
+                    'symbol': symbol,
+                    'balance': {
+                        'free': free_balance,
+                        'locked': locked_balance,
+                        'total': total_balance
+                    },
+                    'prices': {
+                        'current': current_price,
+                        'average_buy': avg_buy_price,
+                        'change_24h_percent': price_change_24h
+                    },
+                    'values': {
+                        'current_value': current_value,
+                        'invested_amount': invested_amount,
+                        'daily_pnl': daily_pnl
+                    },
+                    'profit_loss': {
+                        'amount': profit_loss,
+                        'percentage': profit_loss_percent,
+                        'status': 'profit' if profit_loss > 0 else 'loss' if profit_loss < 0 else 'neutral'
+                    },
+                    'trading_stats': {
+                        'total_bought': total_bought,
+                        'total_sold': total_sold,
+                        'net_position': total_bought - total_sold
+                    }
+                }
+                
+                portfolio_analysis.append(holding_analysis)
+                total_portfolio_value += current_value
+                total_invested += invested_amount
+                total_profit_loss += profit_loss
+            
+            # Sort by current value (largest holdings first)
+            portfolio_analysis.sort(key=lambda x: x['values']['current_value'], reverse=True)
+            
+            # Calculate overall portfolio metrics
+            total_profit_loss_percent = (total_profit_loss / total_invested) * 100 if total_invested > 0 else 0
+            
+            execution_time = time.time() - start_time
+            
+            print(f"\n📊 PORTFOLIO ANALYSIS COMPLETE")
+            print(f"⏱️  Execution Time: {execution_time:.2f} seconds")
+            print(f"💰 Total Portfolio Value: ${total_portfolio_value:.2f}")
+            print(f"📈 Total P&L: ${total_profit_loss:.2f} ({total_profit_loss_percent:.2f}%)")
+            print(f"🪙 Active Holdings: {len(portfolio_analysis)}")
+            
+            return {
+                'status': 'success',
+                'analysis_type': 'portfolio_analysis',
+                'data': portfolio_analysis,
+                'summary': {
+                    'total_portfolio_value': round(total_portfolio_value, 2),
+                    'total_invested': round(total_invested, 2),
+                    'total_profit_loss': round(total_profit_loss, 2),
+                    'total_profit_loss_percent': round(total_profit_loss_percent, 2),
+                    'active_holdings': len(portfolio_analysis),
+                    'quote_currency': quote_currency
+                },
+                'execution_time': round(execution_time, 2),
+                'timestamp': int(time.time() * 1000)
+            }
+            
+        except Exception as e:
+            print(f"❌ Portfolio analysis error: {str(e)}")
+            return {
+                'status': 'error',
+                'message': f'Portfolio analysis failed: {str(e)}',
+                'data': []
+            }
+    
+    def get_user_portfolio(self, api_key: str, private_key: str) -> Dict:
+        """
+        Get user's account balances using Tokocrypto API
+        """
+        try:
+            import hashlib
+            import hmac
+            import urllib.parse
+            
+            # API endpoint
+            endpoint = "/open/v1/account"
+            base_url = "https://www.tokocrypto.com"
+            
+            # Parameters
+            timestamp = str(int(time.time() * 1000))
+            params = {
+                'timestamp': timestamp,
+                'recvWindow': 60000
+            }
+            
+            # Create query string
+            query_string = urllib.parse.urlencode(params)
+            
+            # Create signature
+            signature = hmac.new(
+                private_key.encode('utf-8'),
+                query_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            # Add signature to params
+            params['signature'] = signature
+            query_string = urllib.parse.urlencode(params)
+            
+            # Make request
+            url = f"{base_url}{endpoint}?{query_string}"
+            headers = {
+                'X-MBX-APIKEY': api_key,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return json.loads(response.read().decode())
+                
+        except Exception as e:
+            print(f"❌ Error fetching portfolio: {str(e)}")
+            return {'error': str(e)}
+    
+    def get_trade_history(self, api_key: str, private_key: str, limit: int = 1000) -> List:
+        """
+        Get user's trading history for profit calculation
+        """
+        try:
+            import hashlib
+            import hmac
+            import urllib.parse
+            
+            # API endpoint
+            endpoint = "/open/v1/myTrades"
+            base_url = "https://www.tokocrypto.com"
+            
+            # Parameters
+            timestamp = str(int(time.time() * 1000))
+            params = {
+                'timestamp': timestamp,
+                'limit': limit,
+                'recvWindow': 60000
+            }
+            
+            # Create query string
+            query_string = urllib.parse.urlencode(params)
+            
+            # Create signature
+            signature = hmac.new(
+                private_key.encode('utf-8'),
+                query_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            # Add signature to params
+            params['signature'] = signature
+            query_string = urllib.parse.urlencode(params)
+            
+            # Make request
+            url = f"{base_url}{endpoint}?{query_string}"
+            headers = {
+                'X-MBX-APIKEY': api_key,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return json.loads(response.read().decode())
+                
+        except Exception as e:
+            print(f"❌ Error fetching trade history: {str(e)}")
+            return []
+    
+    def calculate_average_buy_price(self, trade_history: List, asset: str, quote_currency: str) -> tuple:
+        """
+        Calculate average buy price from trade history
+        Returns: (avg_buy_price, total_bought, total_sold)
+        """
+        symbol = f"{asset}_{quote_currency}"
+        total_buy_amount = 0
+        total_buy_quantity = 0
+        total_sold = 0
+        
+        for trade in trade_history:
+            if trade.get('symbol') == symbol or trade.get('symbol') == f"{asset}{quote_currency}":
+                side = trade.get('side', '').upper()
+                quantity = float(trade.get('qty', 0))
+                price = float(trade.get('price', 0))
+                
+                if side == 'BUY':
+                    total_buy_amount += quantity * price
+                    total_buy_quantity += quantity
+                elif side == 'SELL':
+                    total_sold += quantity
+        
+        avg_buy_price = total_buy_amount / total_buy_quantity if total_buy_quantity > 0 else 0
+        
+        return avg_buy_price, total_buy_quantity, total_sold
+
     def detect_dramatic_drops(self, quote_currency: str = 'USDT', limit: int = 900) -> Dict:
         """
         Deteksi coins yang turun drastis seperti gambar - menggunakan candlestick analysis

@@ -257,6 +257,48 @@ def application(environ, start_response):
                     }
                 }
                 return [json.dumps(error_response).encode()]
+                
+        elif path == '/portfolio-analysis':
+            if not SCREENER_AVAILABLE:
+                status = '503 Service Unavailable'
+                headers = [('Content-Type', 'application/json')]
+                start_response(status, headers)
+                return [json.dumps({"error": "Screener not available", "path": current_dir}).encode()]
+            
+            status = '200 OK'
+            headers = [('Content-Type', 'application/json')]
+            start_response(status, headers)
+            
+            # Get parameters
+            api_key = query_params.get('api_key', '')
+            private_key = query_params.get('private_key', '')
+            quote_currency = query_params.get('quote_currency', 'USDT')
+            
+            if not api_key or not private_key:
+                error_response = {
+                    "status": "error",
+                    "message": "API Key and Private Key are required",
+                    "data": []
+                }
+                return [json.dumps(error_response).encode()]
+            
+            try:
+                screener = TokocryptoScreener()
+                result = screener.analyze_portfolio(api_key, private_key, quote_currency)
+                return [json.dumps(result).encode()]
+            except Exception as e:
+                error_response = {
+                    "status": "error",
+                    "message": str(e),
+                    "data": [],
+                    "debug_info": {
+                        "python_version": sys.version,
+                        "current_dir": os.getcwd(),
+                        "screener_available": SCREENER_AVAILABLE,
+                        "endpoint": "/portfolio-analysis"
+                    }
+                }
+                return [json.dumps(error_response).encode()]
         
         elif path.startswith('/static/'):
             # Serve static files
